@@ -34,8 +34,8 @@ function getTeamCode(teamName, teams) {
 function normalizePlayers(players) {
   if (!Array.isArray(players)) return [];
   return players.map(p => {
-    if (typeof p === 'string') return { name: p, active: true, type: 'Batsman' };
-    return { name: p?.name || '', active: p?.active !== false, type: p?.type || 'Batsman' };
+    if (typeof p === 'string') return { name: p, active: true, type: 'Batsman', role: 'player' };
+    return { name: p?.name || '', active: p?.active !== false, type: p?.type || 'Batsman', role: p?.role || 'player' };
   });
 }
 
@@ -390,6 +390,8 @@ export default function Dashboard() {
                               {activePlayers.map((p, i) => (
                                 <li key={i} className="player-active">
                                   {p.name}
+                                  {p.role === 'captain' && <span className="role-badge role-captain">C</span>}
+                                  {p.role === 'viceCaptain' && <span className="role-badge role-vice-captain">VC</span>}
                                   <span className="player-type-tag">{p.type || 'Batsman'}</span>
                                 </li>
                               ))}

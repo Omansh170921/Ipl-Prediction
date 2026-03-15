@@ -20,6 +20,12 @@ function formatMatchTime(time) {
 
 const PLAYER_TYPES = ['Batsman', 'Bowler', 'All Rounder', 'Wicket Keeper'];
 
+const PLAYER_ROLES = [
+  { value: 'player', label: 'Player' },
+  { value: 'captain', label: 'Captain' },
+  { value: 'viceCaptain', label: 'Vice Captain' },
+];
+
 function getTeamCode(teamName, teams) {
   const t = teams.find(x => (x.name || '').toLowerCase() === (teamName || '').toLowerCase());
   return (t?.code || '').trim() || teamName || '';
@@ -28,9 +34,88 @@ function getTeamCode(teamName, teams) {
 function normalizePlayers(players) {
   if (!Array.isArray(players)) return [];
   return players.map(p => {
-    if (typeof p === 'string') return { name: p, active: true, type: 'Batsman' };
-    return { name: p?.name || '', active: p?.active !== false, type: p?.type || 'Batsman' };
+    if (typeof p === 'string') return { name: p, active: true, type: 'Batsman', role: 'player' };
+    return { name: p?.name || '', active: p?.active !== false, type: p?.type || 'Batsman', role: p?.role || 'player' };
   });
+}
+
+function setPlayerRole(players, index, newRole) {
+  const next = players.map((p, i) => {
+    if (i !== index) {
+      if (newRole === 'captain' && p.role === 'captain') return { ...p, role: 'player' };
+      if (newRole === 'viceCaptain' && p.role === 'viceCaptain') return { ...p, role: 'player' };
+      return p;
+    }
+    return { ...p, role: newRole };
+  });
+  return next;
+}
+
+function parseImportedPlayers(jsonString) {
+  let arr;
+  try {
+    const parsed = JSON.parse(jsonString);
+    arr = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.players) ? parsed.players : null);
+    if (!arr) throw new Error('JSON must be an array of players or { players: [...] }');
+  } catch (e) {
+    return { error: e.message || 'Invalid JSON' };
+  }
+  const validTypes = new Set(PLAYER_TYPES);
+  let players = [];
+  const normRole = (r) => {
+    const s = (r || 'player').toString().toLowerCase().trim();
+    if (s === 'captain' || s === 'c') return 'captain';
+    if (s === 'vicecaptain' || s === 'vice captain' || s === 'vc') return 'viceCaptain';
+    return 'player';
+  };
+  for (let i = 0; i < arr.length; i++) {
+    const p = arr[i];
+    const name = typeof p === 'string' ? p.trim() : (p?.name != null ? String(p.name).trim() : '');
+    if (!name) continue;
+    const active = p?.active !== false;
+    let type = (p?.type || 'Batsman').trim();
+    if (!PLAYER_TYPES.includes(type)) type = 'Batsman';
+    const role = normRole(p?.role);
+    players.push({ name, active, type, role });
+  }
+  if (players.length === 0) return { error: 'No valid players found' };
+  for (let i = 0; i < players.length; i++) {
+    players = setPlayerRole(players, i, players[i].role);
+  }
+  return { players };
+}
+
+function parseImportedMatches(jsonString) {
+  let arr;
+  try {
+    const parsed = JSON.parse(jsonString);
+    arr = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.matches) ? parsed.matches : null);
+    if (!arr) throw new Error('JSON must be an array of matches or { matches: [...] }');
+  } catch (e) {
+    return { error: e.message || 'Invalid JSON' };
+  }
+  const matches = [];
+  for (let i = 0; i < arr.length; i++) {
+    const m = arr[i];
+    const team1 = (m?.team1 || '').toString().trim().toUpperCase();
+    const team2 = (m?.team2 || '').toString().trim().toUpperCase();
+    const date = (m?.date || '').toString().trim();
+    if (!team1 || !team2 || !date) continue;
+    if (team1 === team2) continue;
+    const time = (m?.time || m?.slot || '19:00').toString().trim();
+    const thresholdTime = (m?.thresholdTime || '18:00').toString().trim();
+    const status = (m?.status || 'open').toString().trim().toLowerCase();
+    matches.push({
+      team1,
+      team2,
+      date,
+      time: /^\d{1,2}:\d{2}$/.test(time) ? time : '19:00',
+      thresholdTime: /^\d{1,2}:\d{2}$/.test(thresholdTime) ? thresholdTime : '18:00',
+      status: status || 'open',
+    });
+  }
+  if (matches.length === 0) return { error: 'No valid matches found. Each match needs team1, team2, date.' };
+  return { matches };
 }
 
 export default function Admin() {
@@ -44,6 +129,7 @@ export default function Admin() {
   const [newPlayerInput, setNewPlayerInput] = useState('');
   const [newPlayerType, setNewPlayerType] = useState('Batsman');
   const [newPlayerActive, setNewPlayerActive] = useState(true);
+  const [newPlayerRole, setNewPlayerRole] = useState('player');
   const [newRuleKey, setNewRuleKey] = useState('');
   const [newRuleValue, setNewRuleValue] = useState('');
   const [matchForm, setMatchForm] = useState({
@@ -58,6 +144,14 @@ export default function Admin() {
   const [editPlayerInput, setEditPlayerInput] = useState('');
   const [editPlayerType, setEditPlayerType] = useState('Batsman');
   const [editPlayerActive, setEditPlayerActive] = useState(true);
+  const [editPlayerRole, setEditPlayerRole] = useState('player');
+  const [importJsonText, setImportJsonText] = useState('');
+  const [importError, setImportError] = useState('');
+  const [importMatchJsonText, setImportMatchJsonText] = useState('');
+  const [importMatchError, setImportMatchError] = useState('');
+  const [importMatchLoading, setImportMatchLoading] = useState(false);
+  const [selectedMatchIds, setSelectedMatchIds] = useState([]);
+  const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false);
   const [expandedTeamId, setExpandedTeamId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
@@ -356,9 +450,13 @@ export default function Admin() {
       return;
     }
     // Include any player typed but not yet added
-    const playersToSave = [...newTeamPlayers];
+    let playersToSave = [...newTeamPlayers];
     if (newPlayerInput.trim()) {
-      playersToSave.push({ name: newPlayerInput.trim(), active: newPlayerActive, type: newPlayerType });
+      playersToSave = setPlayerRole(
+        [...playersToSave, { name: newPlayerInput.trim(), active: newPlayerActive, type: newPlayerType, role: newPlayerRole }],
+        playersToSave.length,
+        newPlayerRole
+      );
     }
     try {
       await addDoc(collection(db, 'teams'), {
@@ -405,17 +503,65 @@ export default function Admin() {
   const addPlayerToEdit = () => {
     const val = editPlayerInput.trim();
     if (val && editingTeam) {
-      setEditingTeam(prev => ({ ...prev, players: [...(prev.players || []), { name: val, active: editPlayerActive, type: editPlayerType }] }));
+      const newPlayers = [...(editingTeam.players || []), { name: val, active: editPlayerActive, type: editPlayerType, role: editPlayerRole }];
+      setEditingTeam(prev => ({ ...prev, players: setPlayerRole(newPlayers, newPlayers.length - 1, editPlayerRole) }));
       setEditPlayerInput('');
     }
+  };
+
+  const handleImportPlayersEdit = (replace = true) => {
+    setImportError('');
+    const result = parseImportedPlayers(importJsonText);
+    if (result.error) {
+      setImportError(result.error);
+      return;
+    }
+    let players = replace ? result.players : [...(editingTeam?.players || []), ...result.players];
+    for (let i = 0; i < players.length; i++) {
+      if (players[i].role === 'captain' || players[i].role === 'viceCaptain') {
+        players = setPlayerRole(players, i, players[i].role);
+      }
+    }
+    setEditingTeam(prev => ({ ...prev, players }));
+    setImportJsonText('');
+    setMessage(`Imported ${result.players.length} players. Click Save to persist.`);
+  };
+
+  const handleImportMatches = async () => {
+    setImportMatchError('');
+    const result = parseImportedMatches(importMatchJsonText);
+    if (result.error) {
+      setImportMatchError(result.error);
+      return;
+    }
+    setImportMatchLoading(true);
+    try {
+      for (const m of result.matches) {
+        await addDoc(collection(db, 'matches'), {
+          ...m,
+          createdBy: user.uid,
+          createdAt: new Date().toISOString(),
+        });
+      }
+      setImportMatchJsonText('');
+      setMessage(`Imported ${result.matches.length} matches successfully`);
+      fetchData();
+    } catch (err) {
+      setImportMatchError('Failed to import: ' + (err.message || ''));
+    }
+    setImportMatchLoading(false);
   };
 
   const handleUpdateTeam = async (e) => {
     e.preventDefault();
     if (!editingTeam?.name?.trim()) return;
-    const playersToSave = [...(editingTeam.players || [])];
+    let playersToSave = [...(editingTeam.players || [])];
     if (editPlayerInput.trim()) {
-      playersToSave.push({ name: editPlayerInput.trim(), active: editPlayerActive, type: editPlayerType });
+      playersToSave = setPlayerRole(
+        [...playersToSave, { name: editPlayerInput.trim(), active: editPlayerActive, type: editPlayerType, role: editPlayerRole }],
+        playersToSave.length,
+        editPlayerRole
+      );
     }
     try {
       await updateDoc(doc(db, 'teams', editingTeam.id), {
@@ -600,11 +746,42 @@ export default function Admin() {
     try {
       await deleteDoc(doc(db, 'matches', matchId));
       setEditingMatch(null);
+      setSelectedMatchIds(prev => prev.filter(id => id !== matchId));
       setMessage('Match removed successfully');
       fetchData();
     } catch (err) {
       setMessage('Error: ' + err.message);
     }
+  };
+
+  const toggleMatchSelection = (matchId) => {
+    setSelectedMatchIds(prev =>
+      prev.includes(matchId) ? prev.filter(id => id !== matchId) : [...prev, matchId]
+    );
+  };
+
+  const selectAllMatches = () => setSelectedMatchIds(matches.map(m => m.id));
+  const deselectAllMatches = () => setSelectedMatchIds([]);
+
+  const handleBulkDeleteMatches = async () => {
+    if (selectedMatchIds.length === 0) {
+      setMessage('Select at least one match to delete.');
+      return;
+    }
+    if (!confirm(`Delete ${selectedMatchIds.length} selected match(es)? This cannot be undone.`)) return;
+    setBulkDeleteLoading(true);
+    try {
+      for (const matchId of selectedMatchIds) {
+        await deleteDoc(doc(db, 'matches', matchId));
+      }
+      setEditingMatch(null);
+      setSelectedMatchIds([]);
+      setMessage(`Deleted ${selectedMatchIds.length} match(es) successfully`);
+      fetchData();
+    } catch (err) {
+      setMessage('Error deleting matches: ' + (err.message || ''));
+    }
+    setBulkDeleteLoading(false);
   };
 
   const handleRemoveUser = async (targetUser) => {
@@ -720,7 +897,7 @@ export default function Admin() {
                 maxLength={10}
               />
               <div className="form-group-players">
-                <label>Players (optional) — select type, add name, set Active/Inactive</label>
+                <label>Players (optional) — type, Active/Inactive, Captain/Vice Captain</label>
                 <div className="player-add-row">
                   <input
                     type="text"
@@ -731,7 +908,8 @@ export default function Admin() {
                       if (e.key === 'Enter') {
                         e.preventDefault();
                         if (newPlayerInput.trim()) {
-                          setNewTeamPlayers(prev => [...prev, { name: newPlayerInput.trim(), active: newPlayerActive, type: newPlayerType }]);
+                          const newPlayers = [...newTeamPlayers, { name: newPlayerInput.trim(), active: newPlayerActive, type: newPlayerType, role: newPlayerRole }];
+                          setNewTeamPlayers(setPlayerRole(newPlayers, newTeamPlayers.length, newPlayerRole));
                           setNewPlayerInput('');
                         }
                       }
@@ -754,12 +932,21 @@ export default function Admin() {
                     <option value="active">Active</option>
                     <option value="inactive">Inactive</option>
                   </select>
+                  <select
+                    value={newPlayerRole}
+                    onChange={(e) => setNewPlayerRole(e.target.value)}
+                    className="player-role-select"
+                    title="Captain / Vice Captain"
+                  >
+                    {PLAYER_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                  </select>
                   <button
                     type="button"
                     className="btn btn-secondary btn-sm"
                     onClick={() => {
                       if (newPlayerInput.trim()) {
-                        setNewTeamPlayers(prev => [...prev, { name: newPlayerInput.trim(), active: newPlayerActive, type: newPlayerType }]);
+                        const newPlayers = [...newTeamPlayers, { name: newPlayerInput.trim(), active: newPlayerActive, type: newPlayerType, role: newPlayerRole }];
+                        setNewTeamPlayers(setPlayerRole(newPlayers, newTeamPlayers.length, newPlayerRole));
                         setNewPlayerInput('');
                       }
                     }}
@@ -779,6 +966,14 @@ export default function Admin() {
                         >
                           <option value="active">Active</option>
                           <option value="inactive">Inactive</option>
+                        </select>
+                        <select
+                          value={p.role || 'player'}
+                          onChange={(e) => setNewTeamPlayers(setPlayerRole(newTeamPlayers, i, e.target.value))}
+                          className="chip-role-select"
+                          title="Captain / Vice Captain"
+                        >
+                          {PLAYER_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                         </select>
                         <span>{p.name}</span>
                         <span className="player-type-badge">{p.type || 'Batsman'}</span>
@@ -808,7 +1003,23 @@ export default function Admin() {
                   maxLength={10}
                 />
                 <div className="form-group-players">
-                  <label>Players — use dropdown to set Active/Inactive (playing on match day)</label>
+                  <label>Players — Active/Inactive, Captain/Vice Captain (playing on match day)</label>
+                  <div className="import-players-section">
+                    <h5>Import from JSON</h5>
+                    <p className="import-hint">Paste a JSON array. Format: <code>[{'{'} "name": "Player Name", "active": true, "role": "player", "type": "Batsman" {'}'}, ...]</code></p>
+                    <textarea
+                      value={importJsonText}
+                      onChange={(e) => { setImportJsonText(e.target.value); setImportError(''); }}
+                      placeholder={`[\n  { "name": "Shubman Gill", "active": true, "role": "captain", "type": "Batsman" },\n  ...\n]`}
+                      className="import-json-textarea"
+                      rows={4}
+                    />
+                    {importError && <p className="import-error">{importError}</p>}
+                    <div className="import-actions">
+                      <button type="button" className="btn btn-primary btn-sm" onClick={() => handleImportPlayersEdit(true)}>Replace & Import</button>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleImportPlayersEdit(false)}>Merge & Import</button>
+                    </div>
+                  </div>
                   <div className="player-add-row">
                     <input
                       type="text"
@@ -838,6 +1049,14 @@ export default function Admin() {
                       <option value="active">Active</option>
                       <option value="inactive">Inactive</option>
                     </select>
+                    <select
+                      value={editPlayerRole}
+                      onChange={(e) => setEditPlayerRole(e.target.value)}
+                      className="player-role-select"
+                      title="Captain / Vice Captain"
+                    >
+                      {PLAYER_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                    </select>
                     <button type="button" className="btn btn-secondary btn-sm" onClick={addPlayerToEdit}>Add</button>
                   </div>
                   {(editingTeam.players || []).length > 0 && (
@@ -855,6 +1074,17 @@ export default function Admin() {
                           >
                             <option value="active">Active</option>
                             <option value="inactive">Inactive</option>
+                          </select>
+                          <select
+                            value={p.role || 'player'}
+                            onChange={(e) => setEditingTeam(prev => ({
+                              ...prev,
+                              players: setPlayerRole(prev.players, i, e.target.value),
+                            }))}
+                            className="chip-role-select"
+                            title="Captain / Vice Captain"
+                          >
+                            {PLAYER_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                           </select>
                           <span>{p.name}</span>
                           <select
@@ -874,8 +1104,8 @@ export default function Admin() {
                   )}
                 </div>
                 <div className="form-actions">
+                  <button type="button" className="btn btn-cancel" onClick={() => setEditingTeam(null)}>Cancel</button>
                   <button type="submit" className="btn btn-primary">Save</button>
-                  <button type="button" className="btn btn-secondary" onClick={() => setEditingTeam(null)}>Cancel</button>
                 </div>
               </form>
             )}
@@ -908,6 +1138,8 @@ export default function Admin() {
                               <li key={i} className={p.active ? 'player-active' : ''}>
                                 {p.active && <span className="active-badge">✓</span>}
                                 {p.name}
+                                {p.role === 'captain' && <span className="role-badge role-captain">C</span>}
+                                {p.role === 'viceCaptain' && <span className="role-badge role-vice-captain">VC</span>}
                                 <span className="player-type-tag">{p.type || 'Batsman'}</span>
                               </li>
                             ))}
@@ -1155,6 +1387,24 @@ export default function Admin() {
 
           {activeSection === 'matches' && (
           <section id="section-matches" className="admin-section">
+            <h3>Import Matches (bulk)</h3>
+            <div className="import-players-section">
+              <h5>Paste JSON array</h5>
+              <p className="import-hint">Paste a JSON array of matches. Format: <code>[{'{'} "team1": "PUNJAB KINGS", "team2": "GUJARAT TITANS", "date": "2026-03-31", "time": "19:30", "thresholdTime": "19:00", "status": "open" {'}'}, ...]</code></p>
+              <textarea
+                value={importMatchJsonText}
+                onChange={(e) => { setImportMatchJsonText(e.target.value); setImportMatchError(''); }}
+                placeholder={`[\n  { "team1": "PUNJAB KINGS", "team2": "GUJARAT TITANS", "date": "2026-03-31", "time": "19:30", "thresholdTime": "19:00", "status": "open" },\n  ...\n]`}
+                className="import-json-textarea"
+                rows={5}
+              />
+              {importMatchError && <p className="import-error">{importMatchError}</p>}
+              <button type="button" className="btn btn-primary btn-sm" onClick={handleImportMatches} disabled={importMatchLoading || teams.length === 0}>
+                {importMatchLoading ? 'Importing...' : 'Import Matches'}
+              </button>
+              {teams.length === 0 && <p className="muted" style={{ marginTop: '0.5rem' }}>Add teams first in the Teams section.</p>}
+            </div>
+
             <h2>Add Match</h2>
             {teams.length === 0 ? (
               <p className="muted">Add teams first in the Teams section.</p>
@@ -1224,6 +1474,20 @@ export default function Admin() {
               {matches.length === 0 ? (
                 <p className="muted">No matches yet. Add one above.</p>
               ) : (
+                <>
+                <div className="bulk-actions-row">
+                  <button type="button" className="btn btn-sm" onClick={selectAllMatches}>Select All</button>
+                  <button type="button" className="btn btn-sm" onClick={deselectAllMatches}>Deselect All</button>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-danger"
+                    onClick={handleBulkDeleteMatches}
+                    disabled={selectedMatchIds.length === 0 || bulkDeleteLoading}
+                    title={selectedMatchIds.length === 0 ? 'Select matches to delete' : `Delete ${selectedMatchIds.length} selected`}
+                  >
+                    {bulkDeleteLoading ? 'Deleting...' : `Delete Selected (${selectedMatchIds.length})`}
+                  </button>
+                </div>
                 <div className="matches-table">
                   {editingMatch && (
                     <form onSubmit={handleUpdateMatch} className="match-form edit-form">
@@ -1304,7 +1568,7 @@ export default function Admin() {
                         >
                           Save
                         </button>
-                        <button type="button" className="btn btn-secondary" onClick={() => setEditingMatch(null)}>Cancel</button>
+                        <button type="button" className="btn btn-cancel" onClick={() => setEditingMatch(null)}>Cancel</button>
                       </div>
                     </form>
                   )}
@@ -1315,6 +1579,14 @@ export default function Admin() {
                     const isInsightExpanded = expandedInsightMatchId === m.id;
                     return (
                     <div key={m.id} className="match-row">
+                      <label className="match-select-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={selectedMatchIds.includes(m.id)}
+                          onChange={() => toggleMatchSelection(m.id)}
+                          title="Select for bulk delete"
+                        />
+                      </label>
                       <div className="match-info">
                         <span className="match-teams">{getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)}</span>
                         <span className="match-meta">{m.date} · {formatMatchTime(m.time || m.slot)}</span>
@@ -1437,6 +1709,7 @@ export default function Admin() {
                     );
                   })}
                 </div>
+                </>
               )}
             </div>
             {answerModalQuestion && (
