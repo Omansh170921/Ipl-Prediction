@@ -390,6 +390,10 @@ body {
   margin-left: auto;
 }
 
+.hamburger-btn {
+  display: none;
+}
+
 .dashboard-tab.active {
   background: var(--btn-primary);
   border-color: var(--btn-primary);
@@ -689,6 +693,10 @@ body {
 
 .sidebar-logout {
   color: rgba(255, 255, 255, 0.8);
+}
+
+.sidebar-close {
+  display: none;
 }
 
 /* Admin */
@@ -1720,4 +1728,277 @@ body {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* ========== Mobile Responsive Styles ========== */
+@media (max-width: 768px) {
+  /* Hamburger button - visible only on mobile */
+  .hamburger-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    margin-right: 0.75rem;
+    background: rgba(255, 255, 255, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 1.35rem;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.2s;
+  }
+
+  .hamburger-btn:hover {
+    background: rgba(255, 255, 255, 0.3);
+  }
+
+  /* Sidebar overlay - backdrop when menu is open */
+  .sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 999;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+
+  .sidebar-overlay.open {
+    display: block;
+    opacity: 1;
+  }
+
+  /* Sidebar - hidden by default on mobile, slides in when open */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    width: 260px;
+    min-width: 260px;
+    z-index: 1000;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    box-shadow: none;
+  }
+
+  .sidebar.mobile-open {
+    transform: translateX(0);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.3);
+  }
+
+  .sidebar-brand {
+    padding-right: 3rem;
+  }
+
+  /* Sidebar close button - visible only on mobile */
+  .sidebar-close {
+    display: flex;
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.15);
+    border: none;
+    border-radius: 8px;
+    color: #fff;
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .sidebar-close:hover {
+    background: rgba(255, 255, 255, 0.25);
+  }
+
+  /* Main content - full width on mobile */
+  .app-main {
+    padding: 1rem;
+    min-width: 0;
+  }
+
+  .dashboard-header {
+    margin-bottom: 1.25rem;
+  }
+
+  .dashboard-header h1 {
+    font-size: 1.35rem;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Reduce section padding */
+  .rules-section,
+  .matches-section {
+    padding: 1rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .rules-section h2,
+  .matches-section h2 {
+    font-size: 1.15rem;
+  }
+
+  /* Dashboard tabs - wrap properly */
+  .dashboard-tabs {
+    gap: 0.4rem;
+  }
+
+  .dashboard-tab {
+    padding: 0.45rem 0.9rem;
+    font-size: 0.875rem;
+  }
+
+  /* Filter group - stack on narrow screens */
+  .filter-group {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  /* Match card */
+  .match-card {
+    padding: 1rem;
+  }
+
+  .match-card h3 {
+    font-size: 1rem;
+  }
+
+  /* Prediction row - stack on mobile */
+  .prediction-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .prediction-row select {
+    min-width: 0;
+  }
+
+  .prediction-row .btn {
+    width: 100%;
+  }
+
+  /* Cricket Insights button */
+  .btn-insight {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* Leaderboard table - allow scroll or compact layout */
+  .leaderboard-header,
+  .leaderboard-row {
+    grid-template-columns: 40px 1fr 70px;
+    gap: 0.5rem;
+    padding: 0.6rem 0.75rem;
+    font-size: 0.9rem;
+  }
+
+  .leaderboard-summary {
+    font-size: 0.9rem;
+  }
+
+  /* Account section */
+  .account-actions-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .account-actions-row .btn {
+    width: 100%;
+    margin: 0;
+  }
+
+  /* Modal */
+  .modal-overlay {
+    padding: 0.75rem;
+    align-items: flex-start;
+    padding-top: 2rem;
+  }
+
+  .modal-content {
+    max-width: 100%;
+    padding: 1.25rem;
+  }
+
+  /* Landing & Auth pages */
+  .landing,
+  .auth-page {
+    padding: 1.25rem;
+  }
+
+  .landing-title {
+    font-size: 1.85rem;
+  }
+
+  .landing-title .cricket {
+    font-size: 2.25rem;
+  }
+
+  .landing-subtitle {
+    font-size: 1rem;
+  }
+
+  .landing-buttons {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .landing-buttons .btn {
+    width: 100%;
+  }
+
+  .auth-card {
+    padding: 1.5rem;
+  }
+
+  /* Admin - form layouts */
+  .inline-form,
+  .team-form,
+  .rule-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .rule-form input:first-of-type,
+  .rule-form input:nth-of-type(2) {
+    flex: none;
+    min-width: 0;
+  }
+
+  .config-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Match meta row */
+  .match-meta-row {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+}
+
+/* Very small screens */
+@media (max-width: 380px) {
+  .app-main {
+    padding: 0.75rem;
+  }
+
+  .dashboard-header h1 {
+    font-size: 1.2rem;
+  }
+
+  .match-card {
+    padding: 0.85rem;
+  }
 }

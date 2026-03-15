@@ -84,6 +84,7 @@ export default function Admin() {
   const [rejectingQid, setRejectingQid] = useState(null);
   const [removingQid, setRemovingQid] = useState(null);
   const [answerModalQuestion, setAnswerModalQuestion] = useState(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [correctAnswerInput, setCorrectAnswerInput] = useState('');
   const [submittingAnswer, setSubmittingAnswer] = useState(false);
   const [expandedInsightMatchId, setExpandedInsightMatchId] = useState(null);
@@ -682,10 +683,11 @@ export default function Admin() {
 
   return (
     <div className="app-layout">
-      <Sidebar admin userProfile={userProfile} user={user} onLogout={logout} activeSection={activeSection} onSectionChange={setActiveSection} />
+      <Sidebar admin userProfile={userProfile} user={user} onLogout={logout} activeSection={activeSection} onSectionChange={setActiveSection} isMobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
 
       <main className="app-main">
         <header className="dashboard-header">
+          <button type="button" className="hamburger-btn" onClick={() => setMobileMenuOpen(true)} aria-label="Open menu">☰</button>
           <h1>Admin Panel</h1>
         </header>
 

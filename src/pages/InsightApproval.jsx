@@ -53,6 +53,7 @@ export default function InsightApproval() {
   const [submittingAnswer, setSubmittingAnswer] = useState(false);
   const [expandedInsightMatchId, setExpandedInsightMatchId] = useState(null);
   const [requiredApprovals, setRequiredApprovals] = useState(1);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useAutoDismiss(message, setMessage);
 
@@ -254,8 +255,12 @@ export default function InsightApproval() {
   if (loading) {
     return (
       <div className="app-layout">
-        <Sidebar admin={false} userProfile={userProfile} user={user} onLogout={logout} />
+        <Sidebar admin={false} userProfile={userProfile} user={user} onLogout={logout} isMobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
         <main className="app-main">
+          <header className="dashboard-header">
+            <button type="button" className="hamburger-btn" onClick={() => setMobileMenuOpen(true)} aria-label="Open menu">☰</button>
+            <h1>Cricket Insights Approval</h1>
+          </header>
           <p>Loading...</p>
         </main>
       </div>
@@ -265,8 +270,12 @@ export default function InsightApproval() {
   if (!authorized) {
     return (
       <div className="app-layout">
-        <Sidebar admin={false} userProfile={userProfile} user={user} onLogout={logout} />
+        <Sidebar admin={false} userProfile={userProfile} user={user} onLogout={logout} isMobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
         <main className="app-main">
+          <header className="dashboard-header">
+            <button type="button" className="hamburger-btn" onClick={() => setMobileMenuOpen(true)} aria-label="Open menu">☰</button>
+            <h1>Cricket Insights Approval</h1>
+          </header>
           <h2>Cricket Insights Approval</h2>
           <p className="alert alert-error">Access denied. You are not configured as an approver.</p>
           <button type="button" className="btn btn-secondary" onClick={() => navigate('/dashboard')}>
@@ -285,6 +294,8 @@ export default function InsightApproval() {
         user={user}
         onLogout={logout}
         activeSection="insightApproval"
+        isMobileOpen={mobileMenuOpen}
+        onMobileClose={() => setMobileMenuOpen(false)}
         onSectionChange={(s) => {
           if (['dashboard', 'teams', 'rules', 'matches', 'leaderboard', 'account'].includes(s)) {
             navigate('/dashboard', { state: { section: s } });
@@ -294,6 +305,7 @@ export default function InsightApproval() {
       />
       <main className="app-main">
         <header className="dashboard-header">
+          <button type="button" className="hamburger-btn" onClick={() => setMobileMenuOpen(true)} aria-label="Open menu">☰</button>
           <h1>Cricket Insights Approval</h1>
         </header>
         {message && <div className="alert alert-success">{message}</div>}

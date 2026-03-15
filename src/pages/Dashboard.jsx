@@ -75,6 +75,7 @@ export default function Dashboard() {
   const [cricketInsightsConfig, setCricketInsightsConfig] = useState({ enabled: true, maxQuestionsPerUserPerMatch: 1, maxQuestionsPerMatch: 5 });
   const [insightQuestionCount, setInsightQuestionCount] = useState({});
   const [insightPointsByMatch, setInsightPointsByMatch] = useState({});
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const today = new Date().toISOString().split('T')[0];
 
   useEffect(() => {
@@ -328,10 +329,15 @@ export default function Dashboard() {
         activeSection={activeSection}
         onSectionChange={setActiveSection}
         isInsightApprover={(cricketInsightsConfig.insightApproverIds || []).includes(user?.uid)}
+        isMobileOpen={mobileMenuOpen}
+        onMobileClose={() => setMobileMenuOpen(false)}
       />
 
       <main className="app-main">
         <header className="dashboard-header">
+          <button type="button" className="hamburger-btn" onClick={() => setMobileMenuOpen(true)} aria-label="Open menu">
+            ☰
+          </button>
           <h1>🏏 IPL Prediction Portal</h1>
         </header>
 
