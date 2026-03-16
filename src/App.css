@@ -792,6 +792,7 @@ button.stat-card.stat-card-clickable:hover {
   display: flex;
   align-items: center;
   gap: 0.35rem;
+  max-width: calc(100% - 1rem);
 }
 
 .match-card-icons .btn {
@@ -804,9 +805,13 @@ button.stat-card.stat-card-clickable:hover {
   padding-top: 0.25rem;
 }
 
-/* Leave room for corner icons when present - prevents text overlap */
+/* Leave room for corner icons (participant + insight) when present - prevents text overlap */
+.match-card:has(.match-card-icons .btn) {
+  padding-right: 7rem;
+}
+
 .match-card:has(.match-card-icons .btn) .match-info {
-  padding-right: 4rem;
+  padding-right: 0;
 }
 
 .match-threshold {
@@ -2455,14 +2460,14 @@ button.stat-card.stat-card-clickable:hover {
     overflow: hidden;
   }
 
-  .match-card:has(.match-card-icons .btn) .match-info,
-  .match-card-history:has(.match-card-icons .btn) .match-info {
-    padding-right: 3rem;
+  .match-card:has(.match-card-icons .btn),
+  .match-card-history:has(.match-card-icons .btn) {
+    padding-right: 6rem;
   }
 
   .match-card-icons {
     gap: 0.25rem;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     max-width: 100%;
   }
 
@@ -2511,8 +2516,8 @@ button.stat-card.stat-card-clickable:hover {
     width: 100%;
   }
 
-  /* Cricket Insights button */
-  .btn-insight {
+  /* Cricket Insights button (full-width in main content, not the compact icon in card corner) */
+  .btn-insight:not(.btn-icon-only) {
     width: 100%;
     justify-content: center;
   }
@@ -2694,9 +2699,9 @@ button.stat-card.stat-card-clickable:hover {
     padding: 0.85rem;
   }
 
-  .match-card:has(.match-card-icons .btn) .match-info,
-  .match-card-history:has(.match-card-icons .btn) .match-info {
-    padding-right: 2.5rem;
+  .match-card:has(.match-card-icons .btn),
+  .match-card-history:has(.match-card-icons .btn) {
+    padding-right: 5.5rem;
   }
 
   .stats-grid {
