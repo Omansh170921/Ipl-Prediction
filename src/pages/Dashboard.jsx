@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useAutoDismiss } from '../hooks/useAutoDismiss';
 import { useLocation } from 'react-router-dom';
 import CricketInsights from '../components/CricketInsights';
@@ -46,13 +47,16 @@ export default function Dashboard() {
   const [allMatches, setAllMatches] = useState([]);
   const [rules, setRules] = useState([]);
   const [predictions, setPredictions] = useState({});
+  const [savedMatchIds, setSavedMatchIds] = useState(new Set());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(null);
-  const [selectedTeam, setSelectedTeam] = useState('All');
+  const [selectedMatchFilter, setSelectedMatchFilter] = useState('All');
+  const [selectedHistoryMatchFilter, setSelectedHistoryMatchFilter] = useState('All');
   const [showCompleted, setShowCompleted] = useState(true);
   const [expandedTeamId, setExpandedTeamId] = useState(null);
   const [activeTab, setActiveTab] = useState('today');
-  const [activeSection, setActiveSection] = useState('matches');
+  const [activeSection, setActiveSection] = useState('dashboard');
+  const [matchFilterDate, setMatchFilterDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [teams, setTeams] = useState([]);
   const [leaderboard, setLeaderboard] = useState([]);
   const [insightLeaderboard, setInsightLeaderboard] = useState([]);
@@ -72,6 +76,12 @@ export default function Dashboard() {
   const [cpLoading, setCpLoading] = useState(false);
   const [cpMessage, setCpMessage] = useState('');
   const [expandedInsightMatchId, setExpandedInsightMatchId] = useState(null);
+  const [participantsModal, setParticipantsModal] = useState(null);
+  const [participantsLoading, setParticipantsLoading] = useState(false);
+  const [showPointsHistoryModal, setShowPointsHistoryModal] = useState(false);
+  const [showWinsLossesModal, setShowWinsLossesModal] = useState(false);
+  const [showParticipatedModal, setShowParticipatedModal] = useState(false);
+  const [showTodayMatchesModal, setShowTodayMatchesModal] = useState(false);
   const [cricketInsightsConfig, setCricketInsightsConfig] = useState({ enabled: true, maxQuestionsPerUserPerMatch: 1, maxQuestionsPerMatch: 5 });
   const [insightQuestionCount, setInsightQuestionCount] = useState({});
   const [insightPointsByMatch, setInsightPointsByMatch] = useState({});
@@ -94,26 +104,50 @@ export default function Dashboard() {
   useAutoDismiss(surrenderError, setSurrenderError);
   useAutoDismiss(cpMessage, setCpMessage);
 
-  const getUniqueTeams = (list) => ['All', ...[...new Set(list.flatMap(m => [m.team1, m.team2].filter(Boolean)))].sort()];
-  const teamOptionsToday = getUniqueTeams(matches);
-  const teamOptionsHistory = getUniqueTeams(allMatches);
+  const getMatchNum = (m) => parseInt(String(m.matchNumber || m.id || '0'), 10) || 0;
+  const todayMatches = allMatches.filter(m => m.date === today);
+  const dateFilteredMatches = matchFilterDate
+    ? allMatches.filter(m => m.date === matchFilterDate)
+    : allMatches;
+  const matchOptionsToday = [...todayMatches]
+    .sort((a, b) => getMatchNum(a) - getMatchNum(b))
+    .map((m, i) => ({
+      id: m.id,
+      label: `${m.matchNumber || (i + 1)} - ${getTeamCode(m.team1, teams)} vs ${getTeamCode(m.team2, teams)}`,
+    }));
+  const historyMatchList = matchFilterDate ? dateFilteredMatches : allMatches;
+  const matchOptionsHistory = [...historyMatchList]
+    .sort((a, b) => {
+      const numA = getMatchNum(a);
+      const numB = getMatchNum(b);
+      if (numA !== numB) return numA - numB;
+      return (a.date || '').localeCompare(b.date || '');
+    })
+    .map((m, i) => ({
+      id: m.id,
+      label: `${m.matchNumber || (i + 1)} - ${getTeamCode(m.team1, teams)} vs ${getTeamCode(m.team2, teams)}`,
+      date: m.date,
+    }));
 
-  const applyFilters = (list) => {
-    let result = list;
-    if (selectedTeam !== 'All') {
-      result = result.filter(m =>
-        (m.team1 || '').toLowerCase() === selectedTeam.toLowerCase() ||
-        (m.team2 || '').toLowerCase() === selectedTeam.toLowerCase()
-      );
-    }
-    return result;
+  const applyFiltersToday = (list) => {
+    if (selectedMatchFilter === 'All') return list;
+    return list.filter(m => m.id === selectedMatchFilter);
+  };
+
+  const applyFiltersHistory = (list) => {
+    if (selectedHistoryMatchFilter === 'All') return list;
+    return list.filter(m => m.id === selectedHistoryMatchFilter);
   };
 
   const sortMatches = (list) => {
     return [...list].sort((a, b) => {
-      const aCompleted = (a.status || '').toLowerCase() === 'completed';
-      const bCompleted = (b.status || '').toLowerCase() === 'completed';
-      if (aCompleted !== bCompleted) return aCompleted ? 1 : -1;
+      const aIsToday = (a.date || '') === today;
+      const bIsToday = (b.date || '') === today;
+      if (aIsToday && !bIsToday) return -1;
+      if (!aIsToday && bIsToday) return 1;
+      const matchNumA = parseInt(String(a.matchNumber || a.id || '0'), 10) || 0;
+      const matchNumB = parseInt(String(b.matchNumber || b.id || '0'), 10) || 0;
+      if (matchNumA !== matchNumB) return matchNumA - matchNumB;
       const cmpDate = (a.date || '').localeCompare(b.date || '');
       if (cmpDate !== 0) return cmpDate;
       const timeA = (a.time || '00:00').padEnd(5, '0');
@@ -122,12 +156,29 @@ export default function Dashboard() {
     });
   };
 
-  const filteredMatches = sortMatches(applyFilters(matches));
-  const historyMatchesRaw = applyFilters(allMatches);
+  const filteredMatches = sortMatches(applyFiltersToday(todayMatches));
+  const historyMatchesRaw = applyFiltersHistory(matchFilterDate ? dateFilteredMatches : allMatches);
+  const maxMatchId = allMatches.length === 0 ? 0 : Math.max(
+    ...allMatches.map(m => parseInt(String(m.matchNumber || '0'), 10)).filter(n => !isNaN(n)),
+    allMatches.length
+  );
   const historyMatchesFiltered = showCompleted
     ? historyMatchesRaw
     : historyMatchesRaw.filter(m => (m.status || '').toLowerCase() !== 'completed');
   const historyMatches = sortMatches(historyMatchesFiltered);
+
+  useEffect(() => {
+    if (selectedMatchFilter !== 'All' && !todayMatches.some(m => m.id === selectedMatchFilter)) {
+      setSelectedMatchFilter('All');
+    }
+  }, [todayMatches, selectedMatchFilter]);
+
+  useEffect(() => {
+    const list = matchFilterDate ? dateFilteredMatches : allMatches;
+    if (selectedHistoryMatchFilter !== 'All' && !list.some(m => m.id === selectedHistoryMatchFilter)) {
+      setSelectedHistoryMatchFilter('All');
+    }
+  }, [matchFilterDate, dateFilteredMatches, allMatches, selectedHistoryMatchFilter]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -141,14 +192,25 @@ export default function Dashboard() {
       const rulesSnap = await getDocs(collection(db, 'rules'));
       setRules(rulesSnap.docs
         .filter(d => d.id !== 'pointRules')
-        .map(d => ({ id: d.id, ...d.data() })));
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0)));
 
       const predSnap = await getDocs(
         query(collection(db, 'predictions'), where('userId', '==', user.uid))
       );
       const preds = {};
-      predSnap.docs.forEach(d => { preds[d.data().matchId] = d.data().predictedWinner; });
+      const savedIds = new Set();
+      predSnap.docs.forEach(d => {
+        const data = d.data();
+        const mid = data.matchId ?? data.matchID;
+        if (mid != null) {
+          const key = String(mid);
+          preds[key] = data.predictedWinner;
+          savedIds.add(key);
+        }
+      });
       setPredictions(preds);
+      setSavedMatchIds(savedIds);
 
       try {
         const qSnap = await getDocs(
@@ -212,7 +274,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     const fetchLeaderboard = async () => {
-      if (activeSection !== 'leaderboard') return;
+      if (activeSection !== 'leaderboard' && activeSection !== 'dashboard') return;
       setLeaderboardLoading(true);
       try {
         const [usersSnap, matchesSnap, predsSnap, ptSnap] = await Promise.all([
@@ -312,11 +374,38 @@ export default function Dashboard() {
         username: userProfile?.username,
         createdAt: new Date().toISOString(),
       });
-      setPredictions(prev => ({ ...prev, [matchId]: predictedWinner }));
+      const key = String(matchId);
+      setPredictions(prev => ({ ...prev, [key]: predictedWinner }));
+      setSavedMatchIds(prev => new Set([...prev, key]));
     } catch (err) {
       alert(err.message);
     }
     setSaving(null);
+  };
+
+  const openParticipantsModal = async (match) => {
+    if (!match?.id) return;
+    setParticipantsModal({ match, participants: null });
+    setParticipantsLoading(true);
+    try {
+      const [predsSnap, usersSnap] = await Promise.all([
+        getDocs(query(collection(db, 'predictions'), where('matchId', '==', match.id))),
+        getDocs(collection(db, 'users')).catch(() => ({ docs: [] })),
+      ]);
+      const userMap = {};
+      (usersSnap?.docs || []).forEach(d => { userMap[d.id] = d.data(); });
+      const participants = predsSnap.docs.map(d => {
+        const { userId, predictedWinner } = d.data();
+        const u = userMap[userId];
+        const displayName = u?.username ? toInitCap(String(u.username).replace(/_/g, ' ')) : (u?.email || userId || '—');
+        return { userId, predictedWinner, displayName };
+      });
+      setParticipantsModal(prev => prev && prev.match?.id === match.id ? { ...prev, participants } : prev);
+    } catch (err) {
+      console.error('Fetch participants error:', err);
+      setParticipantsModal(prev => prev && prev.match?.id === match.id ? { ...prev, participants: [], error: 'Failed to load participants' } : prev);
+    }
+    setParticipantsLoading(false);
   };
 
   return (
@@ -345,18 +434,77 @@ export default function Dashboard() {
         {activeSection === 'dashboard' && (
           <section className="rules-section">
             <h2>Overview</h2>
-            {rules.length > 0 && (
-              <>
-                <h3>Rules</h3>
-                <ul>
-                  {rules.slice(0, 3).map((r, i) => (
-                    <li key={r.id || i}>{r.key ? <><strong>{r.key}:</strong> {r.content}</> : r.content}</li>
-                  ))}
-                  {rules.length > 3 && <li className="muted">... and {rules.length - 3} more</li>}
-                </ul>
-              </>
-            )}
-            <p className="muted">Use the sidebar to view Teams, Rules, or Matches in detail.</p>
+            {(() => {
+              const completedMatches = allMatches.filter(m =>
+                (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim()
+              );
+              const participatedMatches = completedMatches.filter(m => {
+                const key = String(m.id);
+                return savedMatchIds.has(key) || !!(predictions[key] ?? predictions[m.id]);
+              });
+              const wins = participatedMatches.filter(m => {
+                const pred = predictions[String(m.id)] ?? predictions[m.id] ?? '';
+                return (pred || '').toString().toLowerCase().trim() === (m.winner || '').toLowerCase().trim();
+              }).length;
+              const losses = participatedMatches.length - wins;
+              const totalPoints = leaderboard.find(u => u.id === user?.uid)?.points ?? 
+                completedMatches.reduce((sum, m) => sum + (m.pointResults?.[user?.uid] ?? 0), 0);
+              const rankIdx = leaderboard.findIndex(u => u.id === user?.uid);
+              const leaderboardRank = leaderboard.length > 0 && rankIdx >= 0 ? rankIdx + 1 : '—';
+              return (
+                <div className="dashboard-stats">
+                  <div className="stats-grid">
+                    <button
+                      type="button"
+                      className="stat-card stat-card-clickable"
+                      onClick={() => setShowTodayMatchesModal(true)}
+                      title="Click to view today's matches"
+                    >
+                      <span className="stat-value">{todayMatches.length}</span>
+                      <span className="stat-label">Matches today ({today})</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="stat-card stat-card-clickable"
+                      onClick={() => setShowParticipatedModal(true)}
+                      title="Click to view matches and your predictions"
+                    >
+                      <span className="stat-value">{participatedMatches?.length ?? 0}</span>
+                      <span className="stat-label">Matches participated</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="stat-card stat-card-clickable"
+                      onClick={() => setShowWinsLossesModal(true)}
+                      title="Click to view matches (win or loss)"
+                    >
+                      <span className="stat-value">{wins} / {losses}</span>
+                      <span className="stat-label">Wins / Losses</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="stat-card stat-card-clickable"
+                      onClick={() => setShowPointsHistoryModal(true)}
+                      title="Click to view points history by match"
+                    >
+                      <span className={`stat-value ${totalPoints >= 0 ? 'points-positive' : 'points-negative'}`}>{totalPoints}</span>
+                      <span className="stat-label">Total points</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="stat-card stat-card-clickable"
+                      onClick={() => setActiveSection('leaderboard')}
+                      title="Click to view Leaderboard"
+                    >
+                      <span className="stat-value">{leaderboardRank === '—' ? '—' : `#${leaderboardRank}`}</span>
+                      <span className="stat-label">Leaderboard position</span>
+                    </button>
+                  </div>
+                  {(leaderboardLoading && activeSection === 'dashboard') && <p className="muted">Loading stats...</p>}
+                  <p className="muted">Use the sidebar to view Teams, Rules, or Matches in detail.</p>
+                </div>
+              );
+            })()}
           </section>
         )}
 
@@ -633,19 +781,19 @@ export default function Dashboard() {
           {activeTab === 'today' && (
             <>
           <h2>Today's Matches ({today})</h2>
-          {matches.length > 0 && (
+          {todayMatches.length > 0 && (
             <>
               <div className="filter-group">
-                <span className="filter-label">Team:</span>
+                <span className="filter-label">Match:</span>
                 <div className="filter-tags">
-                  {teamOptionsToday.map(team => (
+                  {matchOptionsToday.map(mo => (
                     <button
-                      key={team}
+                      key={mo.id}
                       type="button"
-                      className={`filter-tag ${selectedTeam === team ? 'active' : ''}`}
-                      onClick={() => setSelectedTeam(team)}
+                      className={`filter-tag ${selectedMatchFilter === mo.id ? 'active' : ''}`}
+                      onClick={() => setSelectedMatchFilter(selectedMatchFilter === mo.id ? 'All' : mo.id)}
                     >
-                      {team === 'All' ? team : getTeamCode(team, teams)}
+                      {mo.label}
                     </button>
                   ))}
                 </div>
@@ -656,23 +804,49 @@ export default function Dashboard() {
             <p>Loading matches...</p>
           ) : filteredMatches.length === 0 ? (
             <p className="no-matches">
-              {matches.length === 0
-                ? 'No matches scheduled for today. Check back later!'
-                : `No matches match your filters. Try a different team.`}
+              {todayMatches.length === 0
+                ? "No matches scheduled for today. Check back later!"
+                : "No matches match your filters. Try a different match."}
             </p>
           ) : (
             <div className="matches-grid">
-              {filteredMatches.map(match => (
+              {filteredMatches.map((match, idx) => (
                 <div key={match.id} className="match-card">
+                  <div className="match-card-icons">
+                    {!isPredictionEligible(match) && (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline btn-icon-only"
+                        onClick={() => openParticipantsModal(match)}
+                        title="View all participants and their predictions"
+                        aria-label="View all participants"
+                      >
+                        👥
+                      </button>
+                    )}
+                    {cricketInsightsConfig.enabled && (
+                      <button
+                        type="button"
+                        className={`btn btn-sm btn-insight btn-icon-only ${expandedInsightMatchId === match.id ? 'active' : ''}`}
+                        onClick={() => setExpandedInsightMatchId(expandedInsightMatchId === match.id ? null : match.id)}
+                        title="Ask or answer Cricket Insights questions"
+                        aria-label="Cricket Insights"
+                      >
+                        <span className="btn-insight-count">{insightQuestionCount[match.id] || 0}</span>
+                        💡
+                      </button>
+                    )}
+                  </div>
                   <div className="match-info">
+                    <span className="match-number">{match.matchNumber || (idx + 1)}/{maxMatchId}</span>
                     <span className="match-slot">{formatMatchTime(match.time || match.slot)}</span>
                     {(match.thresholdTime || match.time) && (
                       <span className="match-threshold">Predict before {formatMatchTime(match.thresholdTime || match.time)}</span>
                     )}
                     <h3>
-                      <span className={selectedTeam !== 'All' && (match.team1 || '').toLowerCase() === selectedTeam.toLowerCase() ? 'team-highlight' : ''}>{getTeamCode(match.team1, teams)}</span>
+                      <span className={selectedMatchFilter === match.id ? 'team-highlight' : ''}>{getTeamCode(match.team1, teams)}</span>
                       {' vs '}
-                      <span className={selectedTeam !== 'All' && (match.team2 || '').toLowerCase() === selectedTeam.toLowerCase() ? 'team-highlight' : ''}>{getTeamCode(match.team2, teams)}</span>
+                      <span className={selectedMatchFilter === match.id ? 'team-highlight' : ''}>{getTeamCode(match.team2, teams)}</span>
                     </h3>
                   </div>
                   <div className="match-prediction">
@@ -695,7 +869,11 @@ export default function Dashboard() {
                     <div className="prediction-row">
                       <select
                         value={predictions[match.id] || ''}
-                        onChange={(e) => setPredictions(prev => ({ ...prev, [match.id]: e.target.value }))}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setPredictions(prev => ({ ...prev, [match.id]: val }));
+                          setSavedMatchIds(prev => { const next = new Set(prev); next.delete(match.id); return next; });
+                        }}
                         disabled={saving === match.id}
                       >
                         <option value="">Select...</option>
@@ -713,28 +891,13 @@ export default function Dashboard() {
                     </>
                     )}
                   </div>
-                  {predictions[match.id] && (
+                  {predictions[match.id] && savedMatchIds.has(match.id) && (
                     <p className="saved-badge">✓ Saved: {getTeamCode(predictions[match.id], teams)}</p>
                   )}
-                  {cricketInsightsConfig.enabled && (
-                    <>
-                      <div className="match-actions-row">
-                        <button
-                          type="button"
-                          className={`btn btn-sm btn-insight ${expandedInsightMatchId === match.id ? 'active' : ''}`}
-                          onClick={() => setExpandedInsightMatchId(expandedInsightMatchId === match.id ? null : match.id)}
-                          title="Ask or answer Cricket Insights questions"
-                        >
-                          <span className="btn-insight-count">{insightQuestionCount[match.id] || 0}</span>
-                          💡 Cricket Insights
-                        </button>
-                      </div>
-                      {expandedInsightMatchId === match.id && (
-                        <div className="match-insights">
-                          <CricketInsights matchId={match.id} config={cricketInsightsConfig} />
-                        </div>
-                      )}
-                    </>
+                  {cricketInsightsConfig.enabled && expandedInsightMatchId === match.id && (
+                    <div className="match-insights">
+                      <CricketInsights matchId={match.id} matchDate={match.date} matchStatus={match.status} config={cricketInsightsConfig} />
+                    </div>
                   )}
                 </div>
               ))}
@@ -745,23 +908,36 @@ export default function Dashboard() {
 
           {activeTab === 'history' && (
             <>
-              <h2>All Matches History</h2>
+              <div className="match-date-filter">
+                <label htmlFor="match-date-picker">📅 Date:</label>
+                <input
+                  id="match-date-picker"
+                  type="date"
+                  value={matchFilterDate || ''}
+                  onChange={(e) => setMatchFilterDate(e.target.value || today)}
+                  max={new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0]}
+                  className="date-picker-input"
+                />
+                <button type="button" className="btn btn-sm" onClick={() => setMatchFilterDate('')} title="Show all dates">All dates</button>
+              </div>
+              <h2>Matches History {matchFilterDate ? `(${matchFilterDate})` : '(all dates)'}</h2>
               {allMatches.length > 0 && (
                 <>
-                  <div className="filter-group">
-                    <span className="filter-label">Team:</span>
-                    <div className="filter-tags">
-                      {teamOptionsHistory.map(team => (
-                        <button
-                          key={team}
-                          type="button"
-                          className={`filter-tag ${selectedTeam === team ? 'active' : ''}`}
-                          onClick={() => setSelectedTeam(team)}
-                        >
-                          {team === 'All' ? team : getTeamCode(team, teams)}
-                        </button>
+                  <div className="filter-group filter-dropdown-group">
+                    <label htmlFor="history-match-filter">Match:</label>
+                    <select
+                      id="history-match-filter"
+                      value={selectedHistoryMatchFilter}
+                      onChange={(e) => setSelectedHistoryMatchFilter(e.target.value)}
+                      className="match-filter-select"
+                    >
+                      <option value="All">All matches</option>
+                      {matchOptionsHistory.map(mo => (
+                        <option key={mo.id} value={mo.id}>
+                          {mo.date} — {mo.label}
+                        </option>
                       ))}
-                    </div>
+                    </select>
                   </div>
                 </>
               )}
@@ -769,22 +945,54 @@ export default function Dashboard() {
                 <p>Loading matches...</p>
               ) : historyMatches.length === 0 ? (
                 <p className="no-matches">
-                  {allMatches.length === 0 ? 'No matches yet. Check back later!' : 'No matches match your filters. Try a different team.'}
+                  {allMatches.length === 0 ? 'No matches yet. Check back later!' : 'No matches match your filters. Try a different match.'}
                 </p>
               ) : (
                 <div className="matches-grid history-grid">
-                  {historyMatches.map(match => (
+                  {historyMatches.map((match, idx) => (
                     <div key={match.id} className="match-card match-card-history">
+                      <div className="match-card-icons">
+                        {!isPredictionEligible(match) && (
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline btn-icon-only"
+                            onClick={() => openParticipantsModal(match)}
+                            title="View all participants and their predictions"
+                            aria-label="View all participants"
+                          >
+                            👥
+                          </button>
+                        )}
+                        {cricketInsightsConfig.enabled && (
+                          <button
+                            type="button"
+                            className={`btn btn-sm btn-insight btn-icon-only ${expandedInsightMatchId === match.id ? 'active' : ''}`}
+                            onClick={() => setExpandedInsightMatchId(expandedInsightMatchId === match.id ? null : match.id)}
+                            title="Ask or answer Cricket Insights questions"
+                            aria-label="Cricket Insights"
+                          >
+                            <span className="btn-insight-count">{insightQuestionCount[match.id] || 0}</span>
+                            💡
+                          </button>
+                        )}
+                      </div>
                       <div className="match-info">
+                        <span className="match-number">{match.matchNumber || (idx + 1)}/{maxMatchId}</span>
                         <div className="match-meta-row">
                           <span className="match-date">{match.date}</span>
                           <span className="match-slot">{formatMatchTime(match.time || match.slot)}</span>
-                          <span className={`match-status-badge ${match.status || 'open'}`}>{match.status || 'open'}</span>
+                          <span className={`match-status-badge ${(match.status || 'open').toLowerCase() === 'completed' ? 'completed' : match.date === today ? 'today' : 'open'}`}>
+                            {(match.status || 'open').toLowerCase() === 'completed'
+                              ? 'completed'
+                              : match.date === today
+                                ? 'today'
+                                : 'upcoming'}
+                          </span>
                         </div>
                         <h3>
-                          <span className={selectedTeam !== 'All' && (match.team1 || '').toLowerCase() === selectedTeam.toLowerCase() ? 'team-highlight' : ''}>{getTeamCode(match.team1, teams)}</span>
+                          <span className={selectedHistoryMatchFilter === match.id ? 'team-highlight' : ''}>{getTeamCode(match.team1, teams)}</span>
                           {' vs '}
-                          <span className={selectedTeam !== 'All' && (match.team2 || '').toLowerCase() === selectedTeam.toLowerCase() ? 'team-highlight' : ''}>{getTeamCode(match.team2, teams)}</span>
+                          <span className={selectedHistoryMatchFilter === match.id ? 'team-highlight' : ''}>{getTeamCode(match.team2, teams)}</span>
                         </h3>
                         {match.winner && <p className="match-winner-badge">🏆 Winner: {getTeamCode(match.winner, teams)}</p>}
                       </div>
@@ -801,25 +1009,10 @@ export default function Dashboard() {
                           <p className="match-points-badge match-insight-points">Insight points: <strong className="points-positive">+{insightPointsByMatch[match.id]}</strong></p>
                         )}
                       </div>
-                      {cricketInsightsConfig.enabled && (
-                        <>
-                          <div className="match-actions-row">
-                            <button
-                              type="button"
-                              className={`btn btn-sm btn-insight ${expandedInsightMatchId === match.id ? 'active' : ''}`}
-                              onClick={() => setExpandedInsightMatchId(expandedInsightMatchId === match.id ? null : match.id)}
-                              title="Ask or answer Cricket Insights questions"
-                            >
-                              <span className="btn-insight-count">{insightQuestionCount[match.id] || 0}</span>
-                              💡 Cricket Insights
-                            </button>
-                          </div>
-                          {expandedInsightMatchId === match.id && (
-                            <div className="match-insights">
-                              <CricketInsights matchId={match.id} config={cricketInsightsConfig} />
-                            </div>
-                          )}
-                        </>
+                      {cricketInsightsConfig.enabled && expandedInsightMatchId === match.id && (
+                        <div className="match-insights">
+                          <CricketInsights matchId={match.id} matchDate={match.date} matchStatus={match.status} config={cricketInsightsConfig} />
+                        </div>
                       )}
                     </div>
                   ))}
@@ -923,6 +1116,198 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+      )}
+
+      {participantsModal && (
+        <div className="modal-overlay" onClick={() => !participantsLoading && setParticipantsModal(null)}>
+          <div className="modal-content participants-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>
+                Participants — {getTeamCode(participantsModal.match?.team1, teams)} vs {getTeamCode(participantsModal.match?.team2, teams)}
+              </h3>
+              <button type="button" className="modal-close" onClick={() => !participantsLoading && setParticipantsModal(null)} aria-label="Close">&times;</button>
+            </div>
+            {participantsLoading ? (
+              <p className="muted">Loading participants...</p>
+            ) : participantsModal.error ? (
+              <p className="alert alert-error">{participantsModal.error}</p>
+            ) : !participantsModal.participants || participantsModal.participants.length === 0 ? (
+              <p className="muted">No participants have made a prediction for this match.</p>
+            ) : (
+              <ul className="participants-list">
+                {participantsModal.participants.map((p, i) => (
+                  <li key={p.userId || i} className="participant-item">
+                    <span className="participant-name">{p.displayName}</span>
+                    <span className="participant-prediction">{getTeamCode(p.predictedWinner, teams) || p.predictedWinner || '—'}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showPointsHistoryModal && createPortal(
+        <div className="modal-overlay" onClick={() => setShowPointsHistoryModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Points History</h3>
+              <button type="button" className="modal-close" onClick={() => setShowPointsHistoryModal(false)} aria-label="Close">&times;</button>
+            </div>
+            {(() => {
+              const completed = allMatches
+                .filter(m => (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim())
+                .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+              let runningTotal = 0;
+              return completed.length === 0 ? (
+                <p className="muted">No completed matches yet.</p>
+              ) : (
+                <ul className="points-history-list">
+                  {completed.map((m) => {
+                    const predPoints = m.pointResults?.[user?.uid];
+                    const insightPts = insightPointsByMatch[m.id] ?? 0;
+                    const predVal = predPoints != null ? predPoints : 0;
+                    runningTotal += predVal + insightPts;
+                    return (
+                      <li key={m.id} className="points-history-item">
+                        <span className="points-history-match">
+                          #{m.matchNumber || m.id} {getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)} ({m.date})
+                        </span>
+                        <span className="points-history-detail">
+                          {predPoints != null ? (
+                            <span className={predPoints >= 0 ? 'points-positive' : 'points-negative'}>Prediction: {predPoints >= 0 ? '+' : ''}{predPoints}</span>
+                          ) : (
+                            <span className="muted">—</span>
+                          )}
+                          {insightPts > 0 && (
+                            <span className="points-positive"> · Insight: +{insightPts}</span>
+                          )}
+                          <span className="points-history-total"> → {runningTotal}</span>
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              );
+            })()}
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {showWinsLossesModal && createPortal(
+        <div className="modal-overlay" onClick={() => setShowWinsLossesModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Wins &amp; Losses</h3>
+              <button type="button" className="modal-close" onClick={() => setShowWinsLossesModal(false)} aria-label="Close">&times;</button>
+            </div>
+            {(() => {
+              const completed = allMatches
+                .filter(m => (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim());
+              const participated = completed.filter(m => {
+                const key = String(m.id);
+                return savedMatchIds.has(key) || !!(predictions[key] ?? predictions[m.id]);
+              }).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+              return participated.length === 0 ? (
+                <p className="muted">No participated matches yet.</p>
+              ) : (
+                <ul className="points-history-list">
+                  {participated.map((m) => {
+                    const pred = (predictions[String(m.id)] ?? predictions[m.id] ?? '').toString().toLowerCase().trim();
+                    const winner = (m.winner || '').toLowerCase().trim();
+                    const isWin = pred === winner;
+                    return (
+                      <li key={m.id} className="points-history-item">
+                        <span className="points-history-match">
+                          #{m.matchNumber || m.id} {getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)} ({m.date})
+                        </span>
+                        <span className={`points-history-detail ${isWin ? 'points-positive' : 'points-negative'}`}>
+                          {isWin ? '✓ Win' : '✗ Loss'} — Predicted {getTeamCode(pred, teams) || pred || '?'}, winner: {getTeamCode(m.winner, teams) || m.winner}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              );
+            })()}
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {showTodayMatchesModal && createPortal(
+        <div className="modal-overlay" onClick={() => setShowTodayMatchesModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Matches Today ({today})</h3>
+              <button type="button" className="modal-close" onClick={() => setShowTodayMatchesModal(false)} aria-label="Close">&times;</button>
+            </div>
+            {todayMatches.length === 0 ? (
+              <p className="muted">No matches scheduled for today.</p>
+            ) : (
+              <ul className="points-history-list">
+                {[...todayMatches].sort((a, b) => (a.time || '00:00').localeCompare(b.time || '00:00')).map((m) => {
+                  const predicted = predictions[String(m.id)] ?? predictions[m.id] ?? '';
+                  return (
+                    <li key={m.id} className="points-history-item">
+                      <span className="points-history-match">
+                        #{m.matchNumber || m.id} {getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)}
+                      </span>
+                      <span className="points-history-detail">
+                        {formatMatchTime(m.time || m.slot)} · Predict before {formatMatchTime(m.thresholdTime || m.time)}
+                        {predicted && (
+                          <span className="points-positive"> · Your prediction: <strong>{getTeamCode(predicted, teams) || predicted}</strong></span>
+                        )}
+                        <span className="muted"> · {(m.status || 'open').toLowerCase() === 'completed' ? 'completed' : m.date === today ? 'today' : 'upcoming'}</span>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {showParticipatedModal && createPortal(
+        <div className="modal-overlay" onClick={() => setShowParticipatedModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Matches Participated</h3>
+              <button type="button" className="modal-close" onClick={() => setShowParticipatedModal(false)} aria-label="Close">&times;</button>
+            </div>
+            {(() => {
+              const completed = allMatches
+                .filter(m => (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim());
+              const participated = completed.filter(m => {
+                const key = String(m.id);
+                return savedMatchIds.has(key) || !!(predictions[key] ?? predictions[m.id]);
+              }).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+              return participated.length === 0 ? (
+                <p className="muted">No participated matches yet.</p>
+              ) : (
+                <ul className="points-history-list">
+                  {participated.map((m) => {
+                    const predicted = predictions[String(m.id)] ?? predictions[m.id] ?? '';
+                    return (
+                      <li key={m.id} className="points-history-item">
+                        <span className="points-history-match">
+                          #{m.matchNumber || m.id} {getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)} ({m.date})
+                        </span>
+                        <span className="points-history-detail">
+                          Predicted: <strong>{getTeamCode(predicted, teams) || predicted || '—'}</strong>
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              );
+            })()}
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );

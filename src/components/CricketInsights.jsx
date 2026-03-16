@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, addDoc, getDocs, query, where } from 'firebase/firestore';
+import { collection, addDoc, getDocs, query, where, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { useAuth } from '../context/AuthContext';
 
@@ -8,8 +8,8 @@ const QUESTION_TYPES = [
   { value: 'multiple', label: 'Multiple Choice', options: [] },
 ];
 
-export default function CricketInsights({ matchId, config = {} }) {
-  const { user } = useAuth();
+export default function CricketInsights({ matchId, matchDate, matchStatus, config = {} }) {
+  const { user, userProfile } = useAuth();
   const maxPerUser = Math.max(1, parseInt(config.maxQuestionsPerUserPerMatch, 10) || 1);
   const maxPerMatch = Math.max(1, parseInt(config.maxQuestionsPerMatch, 10) || 5);
   const [questions, setQuestions] = useState([]);
@@ -25,10 +25,15 @@ export default function CricketInsights({ matchId, config = {} }) {
   const [answerLoading, setAnswerLoading] = useState({});
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [removingQid, setRemovingQid] = useState(null);
 
   const fetchQuestions = async () => {
-    if (!user || !matchId) return;
+    if (!matchId) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
+    setError('');
     try {
       const [approvedSnap, allSnap] = await Promise.all([
         getDocs(query(
@@ -42,8 +47,10 @@ export default function CricketInsights({ matchId, config = {} }) {
       setAllMatchQuestions(allSnap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (err) {
       console.error('Fetch questions error:', err);
+      setError(err?.message || 'Failed to load questions. Please try again.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const fetchMyAnswers = async () => {
@@ -102,6 +109,10 @@ export default function CricketInsights({ matchId, config = {} }) {
   const handleSubmitQuestion = async (e) => {
     e.preventDefault();
     setError('');
+    if ((matchStatus || '').toLowerCase() === 'completed') {
+      setError('Match completed. Questions can no longer be asked.');
+      return;
+    }
     if (!questionTitle.trim() || !user) {
       setError('Please enter a question title.');
       return;
@@ -191,11 +202,31 @@ export default function CricketInsights({ matchId, config = {} }) {
     setAnswerLoading(prev => ({ ...prev, [q.id]: false }));
   };
 
+  const handleDeleteQuestion = async (q) => {
+    if (!confirm(`Permanently delete question: "${(q.question || '').slice(0, 50)}${(q.question || '').length > 50 ? '...' : ''}"? This cannot be undone.`)) return;
+    setRemovingQid(q.id);
+    try {
+      await deleteDoc(doc(db, 'cricket_questions', q.id));
+      setQuestions(prev => prev.filter(x => x.id !== q.id));
+      setAllMatchQuestions(prev => prev.filter(x => x.id !== q.id));
+      setSuccess('Question deleted.');
+    } catch (err) {
+      console.error('Delete question error:', err);
+      setError(err?.message || 'Failed to delete question.');
+    }
+    setRemovingQid(null);
+  };
+
   if (!matchId) return null;
 
+  const isAdmin = userProfile?.isAdmin === true || userProfile?.isAdmin === 'true';
+
+  const today = new Date().toISOString().split('T')[0];
+  const isTodayMatch = (matchDate || '') === today;
+  const isMatchCompleted = (matchStatus || '').toLowerCase() === 'completed';
   const myQuestionCount = allMatchQuestions.filter(q => q.createdBy === user?.uid).length;
   const totalCount = allMatchQuestions.length;
-  const canAskQuestion = user && myQuestionCount < maxPerUser && totalCount < maxPerMatch;
+  const canAskQuestion = user && isTodayMatch && !isMatchCompleted && myQuestionCount < maxPerUser && totalCount < maxPerMatch;
 
   return (
     <div className="cricket-insights-inline">
@@ -209,9 +240,13 @@ export default function CricketInsights({ matchId, config = {} }) {
         </button>
       ) : (
         user && (
-          totalCount >= maxPerMatch
-            ? <p className="muted">Maximum {maxPerMatch} questions per match reached.</p>
-            : myQuestionCount >= maxPerUser && <p className="muted">You can ask up to {maxPerUser} question{maxPerUser > 1 ? 's' : ''} per match.</p>
+          isMatchCompleted
+            ? <p className="muted">Match completed. Questions can no longer be asked.</p>
+            : !isTodayMatch
+              ? <p className="muted">Questions can only be asked for today&apos;s matches.</p>
+              : totalCount >= maxPerMatch
+                ? <p className="muted">Maximum {maxPerMatch} questions per match reached.</p>
+                : myQuestionCount >= maxPerUser && <p className="muted">You can ask up to {maxPerUser} question{maxPerUser > 1 ? 's' : ''} per match.</p>
         )
       )}
 
@@ -226,8 +261,24 @@ export default function CricketInsights({ matchId, config = {} }) {
             const opts = q.options || [];
             return (
               <div key={q.id} className="insight-question-card">
-                <h4>{q.question}</h4>
-                <p className="muted">Type: {QUESTION_TYPES.find(t => t.value === q.type)?.label || q.type}</p>
+                <div className="insight-question-header">
+                  <div className="insight-question-content">
+                    <h4>{q.question}</h4>
+                    <p className="muted">Type: {QUESTION_TYPES.find(t => t.value === q.type)?.label || q.type}</p>
+                  </div>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-danger btn-icon-only"
+                      onClick={() => handleDeleteQuestion(q)}
+                      disabled={removingQid === q.id}
+                      title={removingQid === q.id ? 'Removing...' : 'Permanently delete question (admin only)'}
+                      aria-label="Delete"
+                    >
+                      {removingQid === q.id ? '⋯' : '🗑️'}
+                    </button>
+                  )}
+                </div>
                 {answered ? (
                   <p className="insight-answered">You answered: <strong>{myAnswers[q.id]}</strong></p>
                 ) : (

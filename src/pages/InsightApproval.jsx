@@ -99,12 +99,15 @@ export default function InsightApproval() {
             where('correctAnswer', '==', null)
           )),
         ]);
+        const today = new Date().toISOString().split('T')[0];
         setTeams(teamsSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-        setMatches(matchesSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => {
+        const allMatches = matchesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        const todayMatchesList = allMatches.filter(m => (m.date || '') === today).sort((a, b) => {
           const cmpDate = (a.date || '').localeCompare(b.date || '');
           if (cmpDate !== 0) return cmpDate;
           return (a.time || '').localeCompare(b.time || '');
-        }));
+        });
+        setMatches(todayMatchesList);
         setPendingQuestions(pendingSnap.docs.map(d => ({ id: d.id, ...d.data() })));
         setQuestionsAwaitingAnswer(awaitingSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       } catch (err) {
@@ -313,11 +316,17 @@ export default function InsightApproval() {
           <p className="muted">Approve questions or set correct answer after match completes.</p>
           {insightApprovalLoading ? (
             <p>Loading...</p>
-          ) : matches.length === 0 ? (
-            <p className="no-matches">No matches yet.</p>
-          ) : (
+          ) : (() => {
+            const matchesWithInsights = matches.filter((m) => {
+              const matchPending = pendingQuestions.filter(q => q.matchId === m.id);
+              const matchAwaiting = questionsAwaitingAnswer.filter(q => q.matchId === m.id);
+              return matchPending.length > 0 || matchAwaiting.length > 0;
+            });
+            return matchesWithInsights.length === 0 ? (
+              <p className="no-matches">No insight questions pending approval for today&apos;s matches.</p>
+            ) : (
             <div className="matches-table">
-              {matches.map((m) => {
+              {matchesWithInsights.map((m) => {
                 const matchPending = pendingQuestions.filter(q => q.matchId === m.id);
                 const matchAwaiting = questionsAwaitingAnswer.filter(q => q.matchId === m.id);
                 const hasInsights = matchPending.length > 0 || matchAwaiting.length > 0;
@@ -329,7 +338,13 @@ export default function InsightApproval() {
                       <span className="match-teams">{getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)}</span>
                       <span className="match-meta">{m.date} · {formatMatchTime(m.time || m.slot)}</span>
                       {m.winner && <span className="match-winner">Winner: {getTeamCode(m.winner, teams)}</span>}
-                      <span className={`match-status ${m.status || 'open'}`}>{m.status || 'open'}</span>
+                      <span className={`match-status ${(m.status || 'open').toLowerCase() === 'completed' ? 'completed' : m.date === new Date().toISOString().split('T')[0] ? 'today' : 'open'}`}>
+                      {(m.status || 'open').toLowerCase() === 'completed'
+                        ? 'completed'
+                        : m.date === new Date().toISOString().split('T')[0]
+                          ? 'today'
+                          : 'upcoming'}
+                    </span>
                     </div>
                     <div className="match-actions">
                       <button
@@ -365,15 +380,15 @@ export default function InsightApproval() {
                                     )}
                                   </div>
                                   <div className="insight-pending-actions">
-                                    <button type="button" className="btn btn-sm btn-primary" onClick={() => handleApproveQuestion(q)} disabled={approvingQid === q.id || alreadyApproved} title={alreadyApproved ? 'You already approved' : ''}>
-                                      {approvingQid === q.id ? 'Approving...' : alreadyApproved ? 'Approved' : 'Approve'}
+                                    <button type="button" className="btn btn-sm btn-primary btn-icon-only" onClick={() => handleApproveQuestion(q)} disabled={approvingQid === q.id || alreadyApproved} title={alreadyApproved ? 'You already approved' : approvingQid === q.id ? 'Approving...' : 'Approve'} aria-label="Approve">
+                                      {approvingQid === q.id ? '⋯' : '✓'}
                                     </button>
-                                    <button type="button" className="btn btn-sm btn-danger" onClick={() => handleRejectQuestion(q)} disabled={rejectingQid === q.id}>
-                                      {rejectingQid === q.id ? 'Rejecting...' : 'Reject'}
+                                    <button type="button" className="btn btn-sm btn-danger btn-icon-only" onClick={() => handleRejectQuestion(q)} disabled={rejectingQid === q.id} title={rejectingQid === q.id ? 'Rejecting...' : 'Reject'} aria-label="Reject">
+                                      {rejectingQid === q.id ? '⋯' : '✕'}
                                     </button>
                                     {(userProfile?.isAdmin === true || userProfile?.isAdmin === 'true') && (
-                                      <button type="button" className="btn btn-sm" onClick={() => handleRemoveQuestion(q)} disabled={removingQid === q.id} title="Permanently delete question (admin only)">
-                                        {removingQid === q.id ? 'Removing...' : 'Remove'}
+                                      <button type="button" className="btn btn-sm btn-icon-only" onClick={() => handleRemoveQuestion(q)} disabled={removingQid === q.id} title={removingQid === q.id ? 'Removing...' : 'Permanently delete question (admin only)'} aria-label="Remove">
+                                        {removingQid === q.id ? '⋯' : '🗑️'}
                                       </button>
                                     )}
                                   </div>
@@ -402,16 +417,17 @@ export default function InsightApproval() {
                                   <div className="insight-pending-actions">
                                     <button
                                       type="button"
-                                      className="btn btn-sm btn-primary"
+                                      className="btn btn-sm btn-primary btn-icon-only"
                                       onClick={() => openAnswerModal(q)}
                                       disabled={submittingAnswer || !matchCompleted}
-                                      title={!matchCompleted ? 'Match must be completed first' : ''}
+                                      title={!matchCompleted ? 'Match must be completed first' : 'Set correct answer'}
+                                      aria-label="Set correct answer"
                                     >
-                                      Set Correct Answer
+                                      ✓
                                     </button>
                                     {(userProfile?.isAdmin === true || userProfile?.isAdmin === 'true') && (
-                                      <button type="button" className="btn btn-sm" onClick={() => handleRemoveQuestion(q)} disabled={removingQid === q.id} title="Permanently delete question (admin only)">
-                                        {removingQid === q.id ? 'Removing...' : 'Remove'}
+                                      <button type="button" className="btn btn-sm btn-icon-only" onClick={() => handleRemoveQuestion(q)} disabled={removingQid === q.id} title={removingQid === q.id ? 'Removing...' : 'Permanently delete question (admin only)'} aria-label="Remove">
+                                        {removingQid === q.id ? '⋯' : '🗑️'}
                                       </button>
                                     )}
                                   </div>
@@ -429,7 +445,8 @@ export default function InsightApproval() {
                 );
               })}
             </div>
-          )}
+            );
+          })()}
         </section>
         {answerModalQuestion && (
           <div className="modal-overlay" onClick={() => !submittingAnswer && setAnswerModalQuestion(null)}>

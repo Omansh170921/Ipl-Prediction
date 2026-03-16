@@ -105,7 +105,9 @@ function parseImportedMatches(jsonString) {
     const time = (m?.time || m?.slot || '19:00').toString().trim();
     const thresholdTime = (m?.thresholdTime || '18:00').toString().trim();
     const status = (m?.status || 'open').toString().trim().toLowerCase();
+    const matchNumber = (m?.matchNumber ?? m?.matchId ?? String(i + 1)).toString().trim();
     matches.push({
+      matchNumber: matchNumber || String(i + 1),
       team1,
       team2,
       date,
@@ -132,7 +134,9 @@ export default function Admin() {
   const [newPlayerRole, setNewPlayerRole] = useState('player');
   const [newRuleKey, setNewRuleKey] = useState('');
   const [newRuleValue, setNewRuleValue] = useState('');
+  const [newRulePosition, setNewRulePosition] = useState('');
   const [matchForm, setMatchForm] = useState({
+    matchNumber: '',
     team1: '',
     team2: '',
     date: '',
@@ -169,6 +173,7 @@ export default function Admin() {
   const [calculatingMatchId, setCalculatingMatchId] = useState(null);
   const [removingUserId, setRemovingUserId] = useState(null);
   const [removingRuleId, setRemovingRuleId] = useState(null);
+  const [editingRule, setEditingRule] = useState(null);
   const [allUsers, setAllUsers] = useState([]);
   const [usersFetchError, setUsersFetchError] = useState(null);
   const [pendingQuestions, setPendingQuestions] = useState([]);
@@ -582,17 +587,53 @@ export default function Admin() {
     const key = (newRuleKey || '').trim();
     const value = (newRuleValue || '').trim();
     if (!key && !value) return;
+    const position = parseInt(String(newRulePosition || '0'), 10);
     try {
       const docRef = await addDoc(collection(db, 'rules'), {
         ...(key ? { key } : {}),
         content: value || key,
+        position: isNaN(position) ? 0 : position,
         createdBy: user.uid,
         createdAt: new Date().toISOString(),
       });
-      setRules(prev => [...prev, { id: docRef.id, key: key || null, content: value || key }]);
+      setRules(prev => [...prev, { id: docRef.id, key: key || null, content: value || key, position: isNaN(position) ? 0 : position }]);
       setNewRuleKey('');
       setNewRuleValue('');
+      setNewRulePosition('');
       setMessage('Rule added successfully');
+    } catch (err) {
+      setMessage('Error: ' + err.message);
+    }
+  };
+
+  const handleEditRule = (rule) => {
+    setEditingRule({
+      id: rule.id,
+      key: rule.key || '',
+      content: rule.content || '',
+      position: rule.position ?? 0,
+    });
+  };
+
+  const handleUpdateRule = async (e) => {
+    e.preventDefault();
+    if (!editingRule?.id) return;
+    const key = (editingRule.key || '').trim();
+    const value = (editingRule.content || '').trim();
+    if (!key && !value) return;
+    const position = parseInt(String(editingRule.position ?? '0'), 10);
+    try {
+      await updateDoc(doc(db, 'rules', editingRule.id), {
+        key: key || null,
+        content: value || key,
+        position: isNaN(position) ? 0 : position,
+        updatedAt: new Date().toISOString(),
+      });
+      setRules(prev => prev.map(r => r.id === editingRule.id
+        ? { ...r, key: key || null, content: value || key, position: isNaN(position) ? 0 : position }
+        : r));
+      setEditingRule(null);
+      setMessage('Rule updated successfully');
     } catch (err) {
       setMessage('Error: ' + err.message);
     }
@@ -616,8 +657,8 @@ export default function Admin() {
 
   const handleAddMatch = async (e) => {
     e.preventDefault();
-    if (!matchForm.team1 || !matchForm.team2 || !matchForm.date) {
-      setMessage('Please fill all match fields');
+    if (!matchForm.matchNumber?.toString().trim() || !matchForm.team1 || !matchForm.team2 || !matchForm.date) {
+      setMessage('Please fill all match fields including Match ID');
       return;
     }
     if (matchForm.team1 === matchForm.team2) {
@@ -630,14 +671,20 @@ export default function Admin() {
       setMessage('Predict-before time must not be later than match time');
       return;
     }
+    const matchNumber = String(matchForm.matchNumber).trim();
     try {
       await addDoc(collection(db, 'matches'), {
-        ...matchForm,
+        matchNumber,
+        team1: matchForm.team1,
+        team2: matchForm.team2,
+        date: matchForm.date,
+        time: matchForm.time || '19:00',
+        thresholdTime: matchForm.thresholdTime || '18:00',
         status: 'open',
         createdBy: user.uid,
         createdAt: new Date().toISOString(),
       });
-      setMatchForm(prev => ({ team1: '', team2: '', date: prev.date, time: '19:00', thresholdTime: '18:00' }));
+      setMatchForm(prev => ({ matchNumber: '', team1: '', team2: '', date: prev.date, time: '19:00', thresholdTime: '18:00' }));
       setMessage('Match added successfully');
       fetchData();
     } catch (err) {
@@ -654,6 +701,7 @@ export default function Admin() {
     const thresholdTime = match.thresholdTime || '18:00';
     setEditingMatch({
       id: match.id,
+      matchNumber: match.matchNumber || '',
       team1: match.team1 || '',
       team2: match.team2 || '',
       date: match.date || '',
@@ -682,6 +730,7 @@ export default function Admin() {
     }
     try {
       await updateDoc(doc(db, 'matches', editingMatch.id), {
+        matchNumber: (editingMatch.matchNumber || '').toString().trim(),
         team1: editingMatch.team1,
         team2: editingMatch.team2,
         date: editingMatch.date,
@@ -1125,8 +1174,8 @@ export default function Admin() {
                         <span className="team-count"> — {players.length} players, {activeCount} active</span>
                       </button>
                       <div className="team-row-actions">
-                        <button type="button" className="btn btn-sm" onClick={() => handleEditTeam(t)}>Edit</button>
-                        <button type="button" className="btn btn-sm btn-danger" onClick={() => handleDeleteTeam(t.id)}>Remove</button>
+                        <button type="button" className="btn btn-sm btn-icon-only" onClick={() => handleEditTeam(t)} title="Edit" aria-label="Edit">✏️</button>
+                        <button type="button" className="btn btn-sm btn-danger btn-icon-only" onClick={() => handleDeleteTeam(t.id)} title="Remove" aria-label="Remove">🗑️</button>
                       </div>
                     </div>
                     {expandedTeamId === t.id && (
@@ -1159,34 +1208,97 @@ export default function Admin() {
           {activeSection === 'rules' && (
           <section id="section-rules" className="admin-section">
             <h2>Add Rule</h2>
-            <p className="muted">Add key-value pairs. Key appears in bold, value in normal text for users.</p>
-            <form onSubmit={handleAddRule} className="rule-form">
+            <p className="muted">Add key-value pairs. Position ID controls display order (lower = first). Key appears in bold for users.</p>
+            <form onSubmit={handleAddRule} className="rule-form" onKeyDown={(e) => { if (e.key === 'Enter' && e.target.tagName === 'INPUT') e.preventDefault(); }}>
+              <input
+                type="number"
+                min="0"
+                value={newRulePosition}
+                onChange={(e) => setNewRulePosition(e.target.value)}
+                placeholder="Position (0=first)"
+                className="rule-position-input"
+                style={{ width: `${Math.max(6, String(newRulePosition ?? '').length + 2)}ch`, minWidth: '4rem', maxWidth: '6rem' }}
+                title="Position: rules are shown to users ordered by this (ascending). Lower = earlier."
+              />
               <input
                 type="text"
                 value={newRuleKey}
                 onChange={(e) => setNewRuleKey(e.target.value)}
                 placeholder="Key (e.g. Points, Deadline)"
+                className="rule-input-auto"
+                style={{ width: `${Math.max(12, (newRuleKey || '').length + 2)}ch`, minWidth: '12ch', maxWidth: '40ch' }}
               />
-              <input
-                type="text"
+              <textarea
                 value={newRuleValue}
                 onChange={(e) => setNewRuleValue(e.target.value)}
-                placeholder="Value / Description"
+                placeholder="Value / Description (Enter for new line, click Add Rule to save)"
+                className="rule-textarea"
+                rows={Math.max(2, (newRuleValue || '').split('\n').length)}
+                style={{ minHeight: '2.5em' }}
               />
               <button type="submit" className="btn btn-primary">Add Rule</button>
             </form>
+            {editingRule && (
+              <form onSubmit={handleUpdateRule} className="rule-form edit-rule-form" onKeyDown={(e) => { if (e.key === 'Enter' && e.target.tagName === 'INPUT') e.preventDefault(); }}>
+                <h4>Edit Rule</h4>
+                <input
+                  type="number"
+                  min="0"
+                  value={editingRule.position ?? 0}
+                  onChange={(e) => setEditingRule(prev => ({ ...prev, position: e.target.value }))}
+                  placeholder="Position"
+                  className="rule-position-input"
+                  style={{ width: `${Math.max(6, String(editingRule.position ?? '').length + 2)}ch`, minWidth: '4rem', maxWidth: '6rem' }}
+                  title="Position: lower = shown earlier to users"
+                />
+                <input
+                  type="text"
+                  value={editingRule.key}
+                  onChange={(e) => setEditingRule(prev => ({ ...prev, key: e.target.value }))}
+                  placeholder="Key"
+                  className="rule-input-auto"
+                  style={{ width: `${Math.max(12, (editingRule.key || '').length + 2)}ch`, minWidth: '12ch', maxWidth: '40ch' }}
+                />
+                <textarea
+                  value={editingRule.content}
+                  onChange={(e) => setEditingRule(prev => ({ ...prev, content: e.target.value }))}
+                  placeholder="Value / Description (Enter for new line, click Save to update)"
+                  className="rule-textarea"
+                  rows={Math.max(2, (editingRule.content || '').split('\n').length)}
+                  style={{ minHeight: '2.5em' }}
+                />
+                <div className="form-actions">
+                  <button type="submit" className="btn btn-primary">Save</button>
+                  <button type="button" className="btn btn-cancel" onClick={() => setEditingRule(null)}>Cancel</button>
+                </div>
+              </form>
+            )}
             <ul className="rules-list">
-              {rules.map(r => (
+              {[...rules].sort((a, b) => (a.position ?? 0) - (b.position ?? 0)).map(r => (
                 <li key={r.id} className="rule-list-item">
+                  <span className="rule-position-badge" title="Position">{r.position ?? 0}</span>
                   <span>{r.key ? <><strong>{r.key}:</strong> {r.content}</> : r.content}</span>
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => handleRemoveRule(r)}
-                    disabled={removingRuleId === r.id}
-                  >
-                    {removingRuleId === r.id ? 'Removing...' : 'Remove'}
-                  </button>
+                  <div className="rule-actions">
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm btn-icon-only"
+                      onClick={() => handleEditRule(r)}
+                      title="Edit"
+                      aria-label="Edit"
+                    >
+                      ✏️
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm btn-icon-only"
+                      onClick={() => handleRemoveRule(r)}
+                      disabled={removingRuleId === r.id}
+                      title={removingRuleId === r.id ? 'Removing...' : 'Remove'}
+                      aria-label="Remove"
+                    >
+                      {removingRuleId === r.id ? '⋯' : '🗑️'}
+                    </button>
+                  </div>
                 </li>
               ))}
             </ul>
@@ -1390,11 +1502,11 @@ export default function Admin() {
             <h3>Import Matches (bulk)</h3>
             <div className="import-players-section">
               <h5>Paste JSON array</h5>
-              <p className="import-hint">Paste a JSON array of matches. Format: <code>[{'{'} "team1": "PUNJAB KINGS", "team2": "GUJARAT TITANS", "date": "2026-03-31", "time": "19:30", "thresholdTime": "19:00", "status": "open" {'}'}, ...]</code></p>
+              <p className="import-hint">Paste a JSON array of matches. Include <strong>matchId</strong> (or matchNumber) for each. Format: <code>[{'{'} "matchId": "1", "team1": "PUNJAB KINGS", "team2": "GUJARAT TITANS", "date": "2026-03-31", "time": "19:30", "thresholdTime": "19:00", "status": "open" {'}'}, ...]</code></p>
               <textarea
                 value={importMatchJsonText}
                 onChange={(e) => { setImportMatchJsonText(e.target.value); setImportMatchError(''); }}
-                placeholder={`[\n  { "team1": "PUNJAB KINGS", "team2": "GUJARAT TITANS", "date": "2026-03-31", "time": "19:30", "thresholdTime": "19:00", "status": "open" },\n  ...\n]`}
+                placeholder={`[\n  { "matchId": "1", "team1": "PUNJAB KINGS", "team2": "GUJARAT TITANS", "date": "2026-03-31", "time": "19:30", "thresholdTime": "19:00", "status": "open" },\n  { "matchId": "2", "team1": "MI", "team2": "CSK", "date": "2026-04-01", ... },\n  ...\n]`}
                 className="import-json-textarea"
                 rows={5}
               />
@@ -1410,6 +1522,20 @@ export default function Admin() {
               <p className="muted">Add teams first in the Teams section.</p>
             ) : (
             <form onSubmit={handleAddMatch} className="match-form">
+              <div className="form-row">
+                <div className="form-group-inline">
+                  <label htmlFor="match-number">Match ID:</label>
+                  <input
+                    id="match-number"
+                    type="text"
+                    value={matchForm.matchNumber}
+                    onChange={(e) => setMatchForm(prev => ({ ...prev, matchNumber: e.target.value }))}
+                    placeholder="e.g. 1, 2, M1"
+                    required
+                    style={{ width: '80px' }}
+                  />
+                </div>
+              </div>
               <div className="form-row">
                 <select
                   value={matchForm.team1}
@@ -1493,6 +1619,19 @@ export default function Admin() {
                     <form onSubmit={handleUpdateMatch} className="match-form edit-form">
                       <h4>Edit Match</h4>
                       <div className="form-row">
+                        <div className="form-group-inline">
+                          <label htmlFor="edit-match-number">Match ID:</label>
+                          <input
+                            id="edit-match-number"
+                            type="text"
+                            value={editingMatch.matchNumber || ''}
+                            onChange={(e) => setEditingMatch(prev => ({ ...prev, matchNumber: e.target.value }))}
+                            placeholder="e.g. 1, 2"
+                            style={{ width: '80px' }}
+                          />
+                        </div>
+                      </div>
+                      <div className="form-row">
                         <select
                           value={editingMatch.team1}
                           onChange={(e) => setEditingMatch(prev => ({ ...prev, team1: e.target.value }))}
@@ -1544,7 +1683,7 @@ export default function Admin() {
                             value={editingMatch.status || 'open'}
                             onChange={(e) => setEditingMatch(prev => ({ ...prev, status: e.target.value }))}
                           >
-                            <option value="open">Open</option>
+                            <option value="open">Upcoming</option>
                             <option value="completed">Completed</option>
                           </select>
                         </div>
@@ -1588,10 +1727,17 @@ export default function Admin() {
                         />
                       </label>
                       <div className="match-info">
+                        {m.matchNumber && <span className="match-id-badge">#{m.matchNumber}</span>}
                         <span className="match-teams">{getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)}</span>
                         <span className="match-meta">{m.date} · {formatMatchTime(m.time || m.slot)}</span>
                         {m.winner && <span className="match-winner">Winner: {getTeamCode(m.winner, teams)}</span>}
-                        <span className={`match-status ${m.status || 'open'}`}>{m.status || 'open'}</span>
+                        <span className={`match-status ${(m.status || 'open').toLowerCase() === 'completed' ? 'completed' : m.date === new Date().toISOString().split('T')[0] ? 'today' : 'open'}`}>
+                        {(m.status || 'open').toLowerCase() === 'completed'
+                          ? 'completed'
+                          : m.date === new Date().toISOString().split('T')[0]
+                            ? 'today'
+                            : 'upcoming'}
+                      </span>
                       </div>
                       <div className="match-actions">
                         {(m.status || '').toLowerCase() === 'completed' && m.winner && (
@@ -1607,15 +1753,16 @@ export default function Admin() {
                         )}
                         <button
                           type="button"
-                          className={`btn btn-sm btn-insight ${isInsightExpanded ? 'active' : ''}`}
+                          className={`btn btn-sm btn-insight btn-icon-only ${isInsightExpanded ? 'active' : ''}`}
                           onClick={() => setExpandedInsightMatchId(isInsightExpanded ? null : m.id)}
                           title="Insight approval (visible to admin only)"
+                          aria-label="Insight approval"
                         >
                           <span className="btn-insight-count">{matchPending.length + matchAwaiting.length}</span>
-                          💡 Insights
+                          💡
                         </button>
-                        <button type="button" className="btn btn-sm" onClick={() => handleEditMatch(m)}>Edit</button>
-                        <button type="button" className="btn btn-sm btn-danger" onClick={() => handleDeleteMatch(m.id)}>Remove</button>
+                        <button type="button" className="btn btn-sm btn-icon-only" onClick={() => handleEditMatch(m)} title="Edit" aria-label="Edit">✏️</button>
+                        <button type="button" className="btn btn-sm btn-danger btn-icon-only" onClick={() => handleDeleteMatch(m.id)} title="Remove" aria-label="Remove">🗑️</button>
                       </div>
                       {isInsightExpanded && (
                         <div className="match-insight-approval">
@@ -1647,14 +1794,14 @@ export default function Admin() {
                                           )}
                                         </div>
                                         <div className="insight-pending-actions">
-                                          <button type="button" className="btn btn-sm btn-primary" onClick={() => handleApproveQuestion(q)} disabled={approvingQid === q.id || alreadyApproved} title={alreadyApproved ? 'You already approved' : ''}>
-                                            {approvingQid === q.id ? 'Approving...' : alreadyApproved ? 'Approved' : 'Approve'}
+                                          <button type="button" className="btn btn-sm btn-primary btn-icon-only" onClick={() => handleApproveQuestion(q)} disabled={approvingQid === q.id || alreadyApproved} title={alreadyApproved ? 'You already approved' : approvingQid === q.id ? 'Approving...' : 'Approve'} aria-label="Approve">
+                                            {approvingQid === q.id ? '⋯' : '✓'}
                                           </button>
-                                          <button type="button" className="btn btn-sm btn-danger" onClick={() => handleRejectQuestion(q)} disabled={rejectingQid === q.id}>
-                                            {rejectingQid === q.id ? 'Rejecting...' : 'Reject'}
+                                          <button type="button" className="btn btn-sm btn-danger btn-icon-only" onClick={() => handleRejectQuestion(q)} disabled={rejectingQid === q.id} title={rejectingQid === q.id ? 'Rejecting...' : 'Reject'} aria-label="Reject">
+                                            {rejectingQid === q.id ? '⋯' : '✕'}
                                           </button>
-                                          <button type="button" className="btn btn-sm" onClick={() => handleRemoveQuestion(q)} disabled={removingQid === q.id} title="Permanently delete question">
-                                            {removingQid === q.id ? 'Removing...' : 'Remove'}
+                                          <button type="button" className="btn btn-sm btn-icon-only" onClick={() => handleRemoveQuestion(q)} disabled={removingQid === q.id} title={removingQid === q.id ? 'Removing...' : 'Permanently delete question'} aria-label="Remove">
+                                            {removingQid === q.id ? '⋯' : '🗑️'}
                                           </button>
                                         </div>
                                       </li>
@@ -1682,15 +1829,16 @@ export default function Admin() {
                                         <div className="insight-pending-actions">
                                           <button
                                             type="button"
-                                            className="btn btn-sm btn-primary"
+                                            className="btn btn-sm btn-primary btn-icon-only"
                                             onClick={() => openAnswerModal(q)}
                                             disabled={submittingAnswer || (m.status || '').toLowerCase() !== 'completed'}
-                                            title={(m.status || '').toLowerCase() !== 'completed' ? 'Mark match as completed first' : 'Submit correct answer'}
+                                            title={(m.status || '').toLowerCase() !== 'completed' ? 'Mark match as completed first' : 'Set correct answer'}
+                                            aria-label="Set correct answer"
                                           >
-                                            Set Correct Answer
+                                            ✓
                                           </button>
-                                          <button type="button" className="btn btn-sm" onClick={() => handleRemoveQuestion(q)} disabled={removingQid === q.id} title="Permanently delete question">
-                                            {removingQid === q.id ? 'Removing...' : 'Remove'}
+                                          <button type="button" className="btn btn-sm btn-icon-only" onClick={() => handleRemoveQuestion(q)} disabled={removingQid === q.id} title={removingQid === q.id ? 'Removing...' : 'Permanently delete question'} aria-label="Remove">
+                                            {removingQid === q.id ? '⋯' : '🗑️'}
                                           </button>
                                         </div>
                                       </li>
