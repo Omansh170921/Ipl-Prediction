@@ -27,6 +27,15 @@ function isPredictionEligible(match) {
   return new Date() < cutoff;
 }
 
+function canUserPredict(userProfile, programConfig) {
+  const matchStartDate = (programConfig?.matchStartDate || '').trim();
+  if (!matchStartDate) return true;
+  const createdAtDate = (userProfile?.createdAt || '').toString().split('T')[0];
+  if (!createdAtDate) return true;
+  if (createdAtDate < matchStartDate) return true;
+  return userProfile?.predictionApproved === true;
+}
+
 function getTeamCode(teamName, teams) {
   const t = teams.find(x => (x.name || '').toLowerCase() === (teamName || '').toLowerCase());
   return (t?.code || '').trim() || teamName || '';
@@ -83,6 +92,7 @@ export default function Dashboard() {
   const [showParticipatedModal, setShowParticipatedModal] = useState(false);
   const [showTodayMatchesModal, setShowTodayMatchesModal] = useState(false);
   const [cricketInsightsConfig, setCricketInsightsConfig] = useState({ enabled: true, maxQuestionsPerUserPerMatch: 1, maxQuestionsPerMatch: 5 });
+  const [programConfig, setProgramConfig] = useState({ matchStartDate: '' });
   const [insightQuestionCount, setInsightQuestionCount] = useState({});
   const [insightPointsByMatch, setInsightPointsByMatch] = useState({});
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -264,6 +274,15 @@ export default function Dashboard() {
       } catch {
         // use defaults
       }
+      try {
+        const progSnap = await getDoc(doc(db, 'settings', 'programConfig'));
+        if (progSnap.exists()) {
+          const d = progSnap.data();
+          setProgramConfig({ matchStartDate: d.matchStartDate || '' });
+        }
+      } catch {
+        // use defaults
+      }
 
       setAllMatches(all);
       setMatches(todayMatches);
@@ -298,14 +317,24 @@ export default function Dashboard() {
         const rules = ptSnap.exists() ? ptSnap.data() : { notParticipatedPoints: 7, wrongPredictionPoints: 5 };
         setPointRules(rules);
         const totals = calculateLeaderboard(completedMatches, users, predsByMatch, rules);
-        const ranked = users.map(u => ({
+        const sortedByPoints = users.map(u => ({
           ...u,
           points: totals[u.id] ?? 0,
         })).sort((a, b) => (b.points ?? 0) - (a.points ?? 0));
+        let rank = 1;
+        const ranked = sortedByPoints.map((u, i) => {
+          if (i > 0 && (sortedByPoints[i - 1].points ?? 0) > (u.points ?? 0)) rank += 1;
+          return { ...u, rank };
+        });
         setLeaderboard(ranked);
-        const insightRanked = [...users]
+        const sortedByInsight = [...users]
           .map(u => ({ ...u, insightPoints: u.insightPoints ?? 0 }))
           .sort((a, b) => (b.insightPoints ?? 0) - (a.insightPoints ?? 0));
+        rank = 1;
+        const insightRanked = sortedByInsight.map((u, i) => {
+          if (i > 0 && (sortedByInsight[i - 1].insightPoints ?? 0) > (u.insightPoints ?? 0)) rank += 1;
+          return { ...u, rank };
+        });
         setInsightLeaderboard(insightRanked);
       } catch (err) {
         console.error('Leaderboard fetch error:', err);
@@ -361,6 +390,10 @@ export default function Dashboard() {
   };
 
   const handleSavePrediction = async (matchId, predictedWinner, match) => {
+    if (!canUserPredict(userProfile, programConfig)) {
+      alert('You are awaiting admin approval to predict matches. Please contact the admin.');
+      return;
+    }
     if (match && !isPredictionEligible(match)) {
       alert('Prediction closed. You had to predict before the cutoff time.');
       return;
@@ -388,19 +421,23 @@ export default function Dashboard() {
     setParticipantsModal({ match, participants: null });
     setParticipantsLoading(true);
     try {
-      const [predsSnap, usersSnap] = await Promise.all([
+      const [matchSnap, predsSnap, usersSnap] = await Promise.all([
+        getDoc(doc(db, 'matches', match.id)),
         getDocs(query(collection(db, 'predictions'), where('matchId', '==', match.id))),
         getDocs(collection(db, 'users')).catch(() => ({ docs: [] })),
       ]);
+      const matchData = matchSnap?.exists?.() ? { id: matchSnap.id, ...matchSnap.data() } : match;
       const userMap = {};
       (usersSnap?.docs || []).forEach(d => { userMap[d.id] = d.data(); });
       const participants = predsSnap.docs.map(d => {
-        const { userId, predictedWinner } = d.data();
+        const data = d.data();
+        const userId = data.userId ?? data.uid ?? d.id?.split('_')?.[0];
+        const predictedWinner = data.predictedWinner;
         const u = userMap[userId];
         const displayName = u?.username ? toInitCap(String(u.username).replace(/_/g, ' ')) : (u?.email || userId || '—');
         return { userId, predictedWinner, displayName };
       });
-      setParticipantsModal(prev => prev && prev.match?.id === match.id ? { ...prev, participants } : prev);
+      setParticipantsModal(prev => prev && prev.match?.id === match.id ? { ...prev, match: matchData, participants } : prev);
     } catch (err) {
       console.error('Fetch participants error:', err);
       setParticipantsModal(prev => prev && prev.match?.id === match.id ? { ...prev, participants: [], error: 'Failed to load participants' } : prev);
@@ -438,24 +475,19 @@ export default function Dashboard() {
               const completedMatches = allMatches.filter(m =>
                 (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim()
               );
-              /* Matches with saved prediction (increases as soon as user saves) */
-              const participatedMatches = allMatches.filter(m => {
-                const key = String(m.id);
-                return savedMatchIds.has(key) || !!(predictions[key] ?? predictions[m.id]);
-              });
-              const completedParticipated = completedMatches.filter(m => {
-                const key = String(m.id);
-                return savedMatchIds.has(key) || !!(predictions[key] ?? predictions[m.id]);
-              });
+              /* Only matches with prediction saved to Firestore (not unsaved dropdown selection) */
+              const participatedMatches = allMatches.filter(m => savedMatchIds.has(String(m.id)));
+              const completedParticipated = completedMatches.filter(m => savedMatchIds.has(String(m.id)));
               const wins = completedParticipated.filter(m => {
                 const pred = predictions[String(m.id)] ?? predictions[m.id] ?? '';
                 return (pred || '').toString().toLowerCase().trim() === (m.winner || '').toLowerCase().trim();
               }).length;
               const losses = completedParticipated.length - wins;
+              const nonPrediction = completedMatches.length - completedParticipated.length;
               const totalPoints = leaderboard.find(u => u.id === user?.uid)?.points ?? 
                 completedMatches.reduce((sum, m) => sum + (m.pointResults?.[user?.uid] ?? 0), 0);
-              const rankIdx = leaderboard.findIndex(u => u.id === user?.uid);
-              const leaderboardRank = leaderboard.length > 0 && rankIdx >= 0 ? rankIdx + 1 : '—';
+              const currentUserEntry = leaderboard.find(u => u.id === user?.uid);
+              const leaderboardRank = currentUserEntry?.rank ?? '—';
               return (
                 <div className="dashboard-stats">
                   <div className="stats-grid">
@@ -481,10 +513,10 @@ export default function Dashboard() {
                       type="button"
                       className="stat-card stat-card-clickable"
                       onClick={() => setShowWinsLossesModal(true)}
-                      title="Click to view matches (win or loss)"
+                      title="Click to view matches (win, loss, or not participated)"
                     >
-                      <span className="stat-value">{wins} / {losses}</span>
-                      <span className="stat-label">Wins / Losses</span>
+                      <span className="stat-value">{wins} / {losses} / {nonPrediction}</span>
+                      <span className="stat-label">Wins / Losses / Not participated</span>
                     </button>
                     <button
                       type="button"
@@ -608,8 +640,9 @@ export default function Dashboard() {
                 ) : (
                   <>
                     {user && (() => {
-                      const myRank = leaderboard.findIndex(u => u.id === user.uid) + 1;
-                      const myPoints = leaderboard.find(u => u.id === user.uid)?.points ?? 0;
+                      const myEntry = leaderboard.find(u => u.id === user.uid);
+                      const myRank = myEntry?.rank ?? 0;
+                      const myPoints = myEntry?.points ?? 0;
                       return (
                         <p className="leaderboard-summary">
                           Your rank: <strong>{myRank > 0 ? `#${myRank}` : '—'}</strong>
@@ -632,9 +665,9 @@ export default function Dashboard() {
                         <span>User</span>
                         <span>Points</span>
                       </div>
-                      {leaderboard.map((u, i) => (
+                      {leaderboard.map((u) => (
                         <div key={u.id} className={`leaderboard-row ${u.id === user?.uid ? 'current-user' : ''}`}>
-                          <span>{i + 1}</span>
+                          <span>#{u.rank}</span>
                           <span>{toInitCap(u.username || u.email || 'User')}</span>
                           <span className={u.points >= 0 ? 'points-positive' : 'points-negative'}>{u.points}</span>
                         </div>
@@ -654,8 +687,9 @@ export default function Dashboard() {
                 ) : (
                   <>
                     {user && (() => {
-                      const myRank = insightLeaderboard.findIndex(u => u.id === user.uid) + 1;
-                      const myInsightPoints = insightLeaderboard.find(u => u.id === user.uid)?.insightPoints ?? 0;
+                      const myEntry = insightLeaderboard.find(u => u.id === user.uid);
+                      const myRank = myEntry?.rank ?? 0;
+                      const myInsightPoints = myEntry?.insightPoints ?? 0;
                       return (
                         <p className="leaderboard-summary">
                           Your rank: <strong>{myRank > 0 ? `#${myRank}` : '—'}</strong>
@@ -678,9 +712,9 @@ export default function Dashboard() {
                         <span>User</span>
                         <span>Insight Points</span>
                       </div>
-                      {insightLeaderboard.map((u, i) => (
+                      {insightLeaderboard.map((u) => (
                         <div key={u.id} className={`leaderboard-row ${u.id === user?.uid ? 'current-user' : ''}`}>
-                          <span>{i + 1}</span>
+                          <span>#{u.rank}</span>
                           <span>{toInitCap(u.username || u.email || 'User')}</span>
                           <span className="points-positive">{u.insightPoints ?? 0}</span>
                         </div>
@@ -829,7 +863,7 @@ export default function Dashboard() {
                         👥
                       </button>
                     )}
-                    {cricketInsightsConfig.enabled && (
+                    {cricketInsightsConfig.enabled && (match.date || '') <= today && (
                       <button
                         type="button"
                         className={`btn btn-sm btn-insight btn-icon-only ${expandedInsightMatchId === match.id ? 'active' : ''}`}
@@ -855,7 +889,9 @@ export default function Dashboard() {
                     </h3>
                   </div>
                   <div className="match-prediction">
-                        {!isPredictionEligible(match) ? (
+                        {!canUserPredict(userProfile, programConfig) ? (
+                      <p className="prediction-closed">Awaiting admin approval. You registered after the match start date. Contact admin to get approval for predictions.</p>
+                    ) : !isPredictionEligible(match) ? (
                       <>
                         <p className="prediction-closed">Prediction closed. Cutoff was {formatMatchTime(match.thresholdTime || match.time)} on {match.date}.</p>
                         {match.winner && <p className="match-winner-badge">🏆 Winner: {getTeamCode(match.winner, teams)}</p>}
@@ -968,7 +1004,7 @@ export default function Dashboard() {
                             👥
                           </button>
                         )}
-                        {cricketInsightsConfig.enabled && (
+                        {cricketInsightsConfig.enabled && (match.date || '') <= today && (
                           <button
                             type="button"
                             className={`btn btn-sm btn-insight btn-icon-only ${expandedInsightMatchId === match.id ? 'active' : ''}`}
@@ -1139,14 +1175,43 @@ export default function Dashboard() {
             ) : !participantsModal.participants || participantsModal.participants.length === 0 ? (
               <p className="muted">No participants have made a prediction for this match.</p>
             ) : (
-              <ul className="participants-list">
-                {participantsModal.participants.map((p, i) => (
-                  <li key={p.userId || i} className="participant-item">
-                    <span className="participant-name">{p.displayName}</span>
-                    <span className="participant-prediction">{getTeamCode(p.predictedWinner, teams) || p.predictedWinner || '—'}</span>
-                  </li>
-                ))}
-              </ul>
+              <>
+                {(() => {
+                  const m = participantsModal.match;
+                  const isCompleted = (m?.status || '').toLowerCase() === 'completed' && (m?.winner || '').trim();
+                  const pointResults = m?.pointResults && typeof m.pointResults === 'object' ? m.pointResults : null;
+                  const showPoints = isCompleted && pointResults;
+                  return (
+                    <>
+                      {showPoints && (
+                        <p className="muted participants-points-note">Points shown for completed match with winner declared.</p>
+                      )}
+                      <ul className="participants-list">
+                        <li className={`participants-list-header ${!showPoints ? 'participants-list-header-2col' : ''}`}>
+                          <span>User</span>
+                          <span>Prediction</span>
+                          {showPoints && <span className="col-points">Points</span>}
+                        </li>
+                        {participantsModal.participants.map((p, i) => {
+                    const pts = showPoints && p.userId ? pointResults[p.userId] : undefined;
+                    const ptsNum = pts != null && !Number.isNaN(Number(pts)) ? Number(pts) : null;
+                    return (
+                      <li key={p.userId || i} className={`participant-item ${!showPoints ? 'participant-item-no-points' : ''}`}>
+                        <span className="participant-name">{p.displayName}</span>
+                        <span className="participant-prediction">{getTeamCode(p.predictedWinner, teams) || p.predictedWinner || '—'}</span>
+                        {showPoints && (
+                          <span className={`participant-points ${ptsNum != null && ptsNum >= 0 ? 'points-positive' : 'points-negative'}`}>
+                            {ptsNum != null ? (ptsNum >= 0 ? '+' : '') + ptsNum : '—'}
+                          </span>
+                        )}
+                      </li>
+                    );
+                  })}
+                        </ul>
+                    </>
+                  );
+                })()}
+              </>
             )}
           </div>
         </div>
@@ -1204,36 +1269,60 @@ export default function Dashboard() {
         <div className="modal-overlay" onClick={() => setShowWinsLossesModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>Wins &amp; Losses</h3>
+              <h3>Wins / Losses / Not participated</h3>
               <button type="button" className="modal-close" onClick={() => setShowWinsLossesModal(false)} aria-label="Close">&times;</button>
             </div>
             {(() => {
               const completed = allMatches
-                .filter(m => (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim());
-              const participated = completed.filter(m => {
-                const key = String(m.id);
-                return savedMatchIds.has(key) || !!(predictions[key] ?? predictions[m.id]);
-              }).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-              return participated.length === 0 ? (
-                <p className="muted">No participated matches yet.</p>
-              ) : (
-                <ul className="points-history-list">
-                  {participated.map((m) => {
-                    const pred = (predictions[String(m.id)] ?? predictions[m.id] ?? '').toString().toLowerCase().trim();
-                    const winner = (m.winner || '').toLowerCase().trim();
-                    const isWin = pred === winner;
-                    return (
-                      <li key={m.id} className="points-history-item">
-                        <span className="points-history-match">
-                          #{m.matchNumber || m.id} {getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)} ({m.date})
-                        </span>
-                        <span className={`points-history-detail ${isWin ? 'points-positive' : 'points-negative'}`}>
-                          {isWin ? '✓ Win' : '✗ Loss'} — Predicted {getTeamCode(pred, teams) || pred || '?'}, winner: {getTeamCode(m.winner, teams) || m.winner}
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ul>
+                .filter(m => (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim())
+                .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+              const participated = completed.filter(m => savedMatchIds.has(String(m.id)));
+              const noPrediction = completed.filter(m => !savedMatchIds.has(String(m.id)));
+              if (participated.length === 0 && noPrediction.length === 0) {
+                return <p className="muted">No completed matches yet.</p>;
+              }
+              return (
+                <>
+                  {participated.length > 0 && (
+                    <>
+                      <h4 style={{ marginTop: 0 }}>Wins &amp; Losses</h4>
+                      <ul className="points-history-list">
+                        {participated.map((m) => {
+                          const pred = (predictions[String(m.id)] ?? predictions[m.id] ?? '').toString().toLowerCase().trim();
+                          const winner = (m.winner || '').toLowerCase().trim();
+                          const isWin = pred === winner;
+                          return (
+                            <li key={m.id} className="points-history-item">
+                              <span className="points-history-match">
+                                #{m.matchNumber || m.id} {getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)} ({m.date})
+                              </span>
+                              <span className={`points-history-detail ${isWin ? 'points-positive' : 'points-negative'}`}>
+                                {isWin ? '✓ Win' : '✗ Loss'} — Predicted {getTeamCode(pred, teams) || pred || '?'}, winner: {getTeamCode(m.winner, teams) || m.winner}
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </>
+                  )}
+                  {noPrediction.length > 0 && (
+                    <>
+                      <h4>Not participated ({noPrediction.length})</h4>
+                      <ul className="points-history-list">
+                        {noPrediction.map((m) => (
+                          <li key={m.id} className="points-history-item">
+                            <span className="points-history-match">
+                              #{m.matchNumber || m.id} {getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)} ({m.date})
+                            </span>
+                            <span className="points-history-detail muted">
+                              Did not predict · Winner: {getTeamCode(m.winner, teams) || m.winner}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                </>
               );
             })()}
           </div>
@@ -1243,7 +1332,7 @@ export default function Dashboard() {
 
       {showTodayMatchesModal && createPortal(
         <div className="modal-overlay" onClick={() => setShowTodayMatchesModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content modal-today-matches" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Matches Today ({today})</h3>
               <button type="button" className="modal-close" onClick={() => setShowTodayMatchesModal(false)} aria-label="Close">&times;</button>
@@ -1251,21 +1340,62 @@ export default function Dashboard() {
             {todayMatches.length === 0 ? (
               <p className="muted">No matches scheduled for today.</p>
             ) : (
-              <ul className="points-history-list">
+              <ul className="today-matches-modal-list">
                 {[...todayMatches].sort((a, b) => (a.time || '00:00').localeCompare(b.time || '00:00')).map((m) => {
                   const predicted = predictions[String(m.id)] ?? predictions[m.id] ?? '';
+                  const eligible = isPredictionEligible(m);
                   return (
-                    <li key={m.id} className="points-history-item">
-                      <span className="points-history-match">
-                        #{m.matchNumber || m.id} {getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)}
-                      </span>
-                      <span className="points-history-detail">
-                        {formatMatchTime(m.time || m.slot)} · Predict before {formatMatchTime(m.thresholdTime || m.time)}
-                        {predicted && (
-                          <span className="points-positive"> · Your prediction: <strong>{getTeamCode(predicted, teams) || predicted}</strong></span>
-                        )}
-                        <span className="muted"> · {(m.status || 'open').toLowerCase() === 'completed' ? 'completed' : m.date === today ? 'today' : 'upcoming'}</span>
-                      </span>
+                    <li key={m.id} className="today-match-modal-item">
+                      <div className="today-match-modal-header">
+                        <span className="today-match-modal-teams">
+                          #{m.matchNumber || m.id} {getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)}
+                        </span>
+                        <span className="today-match-modal-meta">
+                          {formatMatchTime(m.time || m.slot)} · Predict before {formatMatchTime(m.thresholdTime || m.time)}
+                          <span className="muted"> · {(m.status || 'open').toLowerCase() === 'completed' ? 'completed' : m.date === today ? 'today' : 'upcoming'}</span>
+                        </span>
+                      </div>
+                      {!canUserPredict(userProfile, programConfig) ? (
+                        <p className="prediction-closed">Awaiting admin approval to predict. Contact admin.</p>
+                      ) : eligible ? (
+                        <div className="today-match-modal-prediction">
+                          <label>Predict winner:</label>
+                          <div className="prediction-row">
+                            <select
+                              value={predicted || ''}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setPredictions(prev => ({ ...prev, [m.id]: val }));
+                                setSavedMatchIds(prev => { const next = new Set(prev); next.delete(m.id); return next; });
+                              }}
+                              disabled={saving === m.id}
+                            >
+                              <option value="">Select...</option>
+                              <option value={m.team1}>{getTeamCode(m.team1, teams)}</option>
+                              <option value={m.team2}>{getTeamCode(m.team2, teams)}</option>
+                            </select>
+                            <button
+                              className="btn btn-primary btn-sm"
+                              onClick={() => predicted && handleSavePrediction(m.id, predicted, m)}
+                              disabled={!predicted || saving === m.id}
+                            >
+                              {saving === m.id ? 'Saving...' : 'Save'}
+                            </button>
+                          </div>
+                          {predicted && savedMatchIds.has(m.id) && (
+                            <p className="saved-badge">✓ Saved: {getTeamCode(predicted, teams)}</p>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="today-match-modal-closed">
+                          {predicted ? (
+                            <span className="points-positive">Your prediction: <strong>{getTeamCode(predicted, teams) || predicted}</strong></span>
+                          ) : (
+                            <span className="muted">Prediction closed.</span>
+                          )}
+                          {m.winner && <span className="match-winner-badge">🏆 Winner: {getTeamCode(m.winner, teams)}</span>}
+                        </div>
+                      )}
                     </li>
                   );
                 })}
@@ -1285,10 +1415,7 @@ export default function Dashboard() {
             </div>
             {(() => {
               const participated = allMatches
-                .filter(m => {
-                  const key = String(m.id);
-                  return savedMatchIds.has(key) || !!(predictions[key] ?? predictions[m.id]);
-                })
+                .filter(m => savedMatchIds.has(String(m.id)))
                 .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
               return participated.length === 0 ? (
                 <p className="muted">No participated matches yet.</p>

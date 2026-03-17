@@ -13,8 +13,14 @@ import Dashboard from './pages/Dashboard';
 import Admin from './pages/Admin';
 import InsightApproval from './pages/InsightApproval';
 import './App.css';
+import { requestNotificationPermission } from './notification';
+import { useEffect } from 'react';
 
 function App() {
+  useEffect(() => {
+    requestNotificationPermission();
+  }, []);
+
   return (
     <AuthProvider>
       <BrowserRouter>

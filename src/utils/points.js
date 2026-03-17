@@ -1,3 +1,5 @@
+const to2Decimals = (n) => Math.round(Number(n) * 100) / 100;
+
 /**
  * Calculate points for a completed match.
  * @param {Object} match - Match with winner, team1, team2
@@ -34,12 +36,12 @@ export function calculateMatchPoints(match, allUsers, matchPredictions, pointRul
     }
   });
 
-  const pool = wrong.length * wrongPenalty + notParticipated.length * notParticipatedPenalty;
-  const pointsPerWinner = winners.length > 0 ? pool / winners.length : 0;
+  const pool = to2Decimals(wrong.length * wrongPenalty + notParticipated.length * notParticipatedPenalty);
+  const pointsPerWinner = to2Decimals(winners.length > 0 ? pool / winners.length : 0);
 
   const userPoints = {};
-  wrong.forEach(uid => { userPoints[uid] = -wrongPenalty; });
-  notParticipated.forEach(uid => { userPoints[uid] = -notParticipatedPenalty; });
+  wrong.forEach(uid => { userPoints[uid] = to2Decimals(-wrongPenalty); });
+  notParticipated.forEach(uid => { userPoints[uid] = to2Decimals(-notParticipatedPenalty); });
   winners.forEach(uid => { userPoints[uid] = pointsPerWinner; });
 
   return {
@@ -66,13 +68,13 @@ export function calculateLeaderboard(completedMatches, allUsers, allPredictionsB
   (completedMatches || []).forEach(match => {
     if (match.pointResults && typeof match.pointResults === 'object') {
       Object.entries(match.pointResults).forEach(([uid, pts]) => {
-        totals[uid] = (totals[uid] || 0) + Number(pts);
+        totals[uid] = to2Decimals((totals[uid] || 0) + Number(pts));
       });
     } else {
       const preds = allPredictionsByMatch[match.id] || [];
       const { userPoints } = calculateMatchPoints(match, allUsers, preds, pointRules);
       Object.entries(userPoints || {}).forEach(([uid, pts]) => {
-        totals[uid] = (totals[uid] || 0) + pts;
+        totals[uid] = to2Decimals((totals[uid] || 0) + pts);
       });
     }
   });

@@ -2,6 +2,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, browserLocalPersistence } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { getMessaging } from "firebase/messaging";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "your-api-key",
@@ -11,6 +12,8 @@ const firebaseConfig = {
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "123456789",
   appId: import.meta.env.VITE_FIREBASE_APP_ID || "your-app-id",
 };
+
+
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
@@ -35,3 +38,5 @@ export const callFunction = (name, data) => {
   return httpsCallable(functions, name)(data);
 };
 export default app;
+
+export const messaging = getMessaging(app);

@@ -162,6 +162,7 @@ export default function Admin() {
   const [activeSection, setActiveSection] = useState('matches');
   const [pointRules, setPointRules] = useState({ notParticipatedPoints: 7, wrongPredictionPoints: 5 });
   const [passwordPolicy, setPasswordPolicy] = useState({ maxPasswordChanges: 2, surrenderDeadline: '' });
+  const [programConfig, setProgramConfig] = useState({ matchStartDate: '' });
   const [cricketInsightsConfig, setCricketInsightsConfig] = useState({
     enabled: true,
     maxQuestionsPerUserPerMatch: 1,
@@ -172,6 +173,7 @@ export default function Admin() {
   const [usernameLookupList, setUsernameLookupList] = useState([]);
   const [calculatingMatchId, setCalculatingMatchId] = useState(null);
   const [removingUserId, setRemovingUserId] = useState(null);
+  const [approvingUserId, setApprovingUserId] = useState(null);
   const [removingRuleId, setRemovingRuleId] = useState(null);
   const [editingRule, setEditingRule] = useState(null);
   const [allUsers, setAllUsers] = useState([]);
@@ -187,6 +189,36 @@ export default function Admin() {
   const [correctAnswerInput, setCorrectAnswerInput] = useState('');
   const [submittingAnswer, setSubmittingAnswer] = useState(false);
   const [expandedInsightMatchId, setExpandedInsightMatchId] = useState(null);
+  const [participantsModal, setParticipantsModal] = useState(null);
+  const [participantsLoading, setParticipantsLoading] = useState(false);
+
+  const openParticipantsModal = async (match) => {
+    if (!match?.id) return;
+    setParticipantsModal({ match, participants: null });
+    setParticipantsLoading(true);
+    try {
+      const [matchSnap, predsSnap] = await Promise.all([
+        getDoc(doc(db, 'matches', match.id)),
+        getDocs(query(collection(db, 'predictions'), where('matchId', '==', match.id))),
+      ]);
+      const matchData = matchSnap?.exists?.() ? { id: matchSnap.id, ...matchSnap.data() } : match;
+      const userMap = {};
+      (allUsers || []).forEach(u => { userMap[u.id] = u; });
+      const participants = predsSnap.docs.map(d => {
+        const data = d.data();
+        const userId = data.userId ?? data.uid ?? d.id?.split('_')?.[0];
+        const predictedWinner = data.predictedWinner;
+        const u = userMap[userId];
+        const displayName = u?.username ? toInitCap(String(u.username || '').replace(/_/g, ' ')) : (u?.email || userId || '—');
+        return { userId, predictedWinner, displayName };
+      });
+      setParticipantsModal(prev => prev && prev.match?.id === match.id ? { ...prev, match: matchData, participants } : prev);
+    } catch (err) {
+      console.error('Fetch participants error:', err);
+      setParticipantsModal(prev => prev && prev.match?.id === match.id ? { ...prev, participants: [], error: 'Failed to load participants' } : prev);
+    }
+    setParticipantsLoading(false);
+  };
 
   const fetchData = async () => {
     const timeout = (ms) => new Promise((_, reject) => setTimeout(() => reject(new Error('Request timed out')), ms));
@@ -241,6 +273,15 @@ export default function Admin() {
             maxPasswordChanges: d.maxPasswordChanges ?? 2,
             surrenderDeadline: d.surrenderDeadline || '',
           }));
+        }
+      } catch {
+        // use defaults
+      }
+      try {
+        const progSnap = await getDoc(doc(db, 'settings', 'programConfig'));
+        if (progSnap.exists()) {
+          const d = progSnap.data();
+          setProgramConfig({ matchStartDate: d.matchStartDate || '' });
         }
       } catch {
         // use defaults
@@ -854,6 +895,22 @@ export default function Admin() {
     setRemovingUserId(null);
   };
 
+  const handleApproveUser = async (targetUser) => {
+    if (!targetUser?.id) return;
+    setApprovingUserId(targetUser.id);
+    try {
+      await updateDoc(doc(db, 'users', targetUser.id), {
+        predictionApproved: true,
+        predictionApprovedAt: new Date().toISOString(),
+      });
+      setMessage('User approved for predictions.');
+      setAllUsers(prev => prev.map(u => u.id === targetUser.id ? { ...u, predictionApproved: true } : u));
+    } catch (err) {
+      setMessage('Error: ' + err.message);
+    }
+    setApprovingUserId(null);
+  };
+
   const handleSaveProgramConfig = async (e) => {
     e.preventDefault();
     try {
@@ -863,10 +920,15 @@ export default function Admin() {
       const deadline = (passwordPolicy.surrenderDeadline || '').trim();
       const maxPerUser = Math.max(1, Math.min(10, parseInt(cricketInsightsConfig.maxQuestionsPerUserPerMatch, 10) || 1));
       const maxPerMatch = Math.max(1, Math.min(20, parseInt(cricketInsightsConfig.maxQuestionsPerMatch, 10) || 5));
+      const matchStartDate = (programConfig.matchStartDate || '').trim();
       await Promise.all([
         setDoc(doc(db, 'rules', 'pointRules'), {
           notParticipatedPoints: notParticipated,
           wrongPredictionPoints: wrongPrediction,
+          updatedAt: new Date().toISOString(),
+        }),
+        setDoc(doc(db, 'settings', 'programConfig'), {
+          matchStartDate: matchStartDate || null,
           updatedAt: new Date().toISOString(),
         }),
         setDoc(doc(db, 'settings', 'passwordPolicy'), {
@@ -899,6 +961,7 @@ export default function Admin() {
         }
       }
       setPointRules(prev => ({ ...prev, notParticipatedPoints: notParticipated, wrongPredictionPoints: wrongPrediction }));
+      setProgramConfig(prev => ({ ...prev, matchStartDate }));
       setPasswordPolicy(prev => ({ ...prev, maxPasswordChanges: max, surrenderDeadline: deadline }));
       setCricketInsightsConfig(prev => ({ ...prev, enabled: cricketInsightsConfig.enabled, maxQuestionsPerUserPerMatch: maxPerUser, maxQuestionsPerMatch: maxPerMatch }));
       setMessage('Program config saved successfully');
@@ -1311,6 +1374,19 @@ export default function Admin() {
             <form onSubmit={handleSaveProgramConfig} className="config-form">
               <div className="config-grid">
                 <div className="config-card">
+                  <h3>Program</h3>
+                  <p className="muted">Match start date for late-registration approval. Users who register on or after this date need admin approval before they can predict matches.</p>
+                  <div className="config-item">
+                    <label>Match start date (YYYY-MM-DD):</label>
+                    <input
+                      type="date"
+                      value={programConfig.matchStartDate || ''}
+                      onChange={(e) => setProgramConfig(prev => ({ ...prev, matchStartDate: e.target.value }))}
+                    />
+                  </div>
+                  <p className="muted config-note">Leave empty to allow all users to predict without approval.</p>
+                </div>
+                <div className="config-card">
                   <h3>Point Rules</h3>
                   <p className="muted">Set penalties (as positive numbers). Winners share the pool equally.</p>
                   <div className="config-item">
@@ -1467,7 +1543,7 @@ export default function Admin() {
           {activeSection === 'users' && (
           <section id="section-users" className="admin-section">
             <h2>Users</h2>
-            <p className="muted">Remove users to revoke app access. Admins cannot remove themselves. Firebase Auth account may need to be deleted manually from Firebase Console.</p>
+            <p className="muted">Remove users to revoke app access. Users who registered on or after the match start date need approval before they can predict. Admins cannot remove themselves.</p>
             {usersFetchError ? (
               <p className="alert alert-error">{usersFetchError}</p>
             ) : allUsers.length === 0 ? (
@@ -1477,11 +1553,28 @@ export default function Admin() {
                 {allUsers
                   .filter(u => u.id !== user?.uid)
                   .sort((a, b) => (a.username || a.email || '').localeCompare(b.username || b.email || ''))
-                  .map(u => (
+                  .map(u => {
+                    const matchStartDate = (programConfig.matchStartDate || '').trim();
+                    const createdAtDate = (u.createdAt || '').toString().split('T')[0];
+                    const registeredAfterStart = matchStartDate && createdAtDate && createdAtDate >= matchStartDate;
+                    const needsApproval = registeredAfterStart && u.predictionApproved !== true;
+                    return (
                     <li key={u.id} className="user-list-item">
                       <span>{toInitCap(u.username || u.email || 'User')}</span>
                       <span className="muted"> ({u.email || u.id})</span>
                       {u.isAdmin && <span className="badge-admin">Admin</span>}
+                      {needsApproval && <span className="badge badge-pending">Awaiting approval</span>}
+                      {registeredAfterStart && u.predictionApproved && <span className="badge badge-approved">Approved</span>}
+                      {needsApproval && (
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={() => handleApproveUser(u)}
+                          disabled={approvingUserId === u.id}
+                        >
+                          {approvingUserId === u.id ? 'Approving...' : 'Approve for predictions'}
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="btn btn-secondary btn-sm"
@@ -1491,7 +1584,8 @@ export default function Admin() {
                         {removingUserId === u.id ? 'Removing...' : 'Remove'}
                       </button>
                     </li>
-                  ))}
+                    );
+                  })}
               </ul>
             )}
           </section>
@@ -1753,14 +1847,25 @@ export default function Admin() {
                         )}
                         <button
                           type="button"
-                          className={`btn btn-sm btn-insight btn-icon-only ${isInsightExpanded ? 'active' : ''}`}
-                          onClick={() => setExpandedInsightMatchId(isInsightExpanded ? null : m.id)}
-                          title="Insight approval (visible to admin only)"
-                          aria-label="Insight approval"
+                          className="btn btn-sm btn-outline btn-icon-only"
+                          onClick={() => openParticipantsModal(m)}
+                          title="View participants and their points"
+                          aria-label="View participants"
                         >
-                          <span className="btn-insight-count">{matchPending.length + matchAwaiting.length}</span>
-                          💡
+                          👥
                         </button>
+                        {(m.date || '') <= new Date().toISOString().split('T')[0] && (
+                          <button
+                            type="button"
+                            className={`btn btn-sm btn-insight btn-icon-only ${isInsightExpanded ? 'active' : ''}`}
+                            onClick={() => setExpandedInsightMatchId(isInsightExpanded ? null : m.id)}
+                            title="Insight approval (visible to admin only)"
+                            aria-label="Insight approval"
+                          >
+                            <span className="btn-insight-count">{matchPending.length + matchAwaiting.length}</span>
+                            💡
+                          </button>
+                        )}
                         <button type="button" className="btn btn-sm btn-icon-only" onClick={() => handleEditMatch(m)} title="Edit" aria-label="Edit">✏️</button>
                         <button type="button" className="btn btn-sm btn-danger btn-icon-only" onClick={() => handleDeleteMatch(m.id)} title="Remove" aria-label="Remove">🗑️</button>
                       </div>
@@ -1860,6 +1965,63 @@ export default function Admin() {
                 </>
               )}
             </div>
+            {participantsModal && (
+              <div className="modal-overlay" onClick={() => !participantsLoading && setParticipantsModal(null)}>
+                <div className="modal-content participants-modal" onClick={e => e.stopPropagation()}>
+                  <div className="modal-header">
+                    <h3>
+                      Participants — {getTeamCode(participantsModal.match?.team1, teams)} vs {getTeamCode(participantsModal.match?.team2, teams)}
+                    </h3>
+                    <button type="button" className="modal-close" onClick={() => !participantsLoading && setParticipantsModal(null)} aria-label="Close">&times;</button>
+                  </div>
+                  {participantsLoading ? (
+                    <p className="muted">Loading participants...</p>
+                  ) : participantsModal.error ? (
+                    <p className="alert alert-error">{participantsModal.error}</p>
+                  ) : !participantsModal.participants || participantsModal.participants.length === 0 ? (
+                    <p className="muted">No participants have made a prediction for this match.</p>
+                  ) : (
+                    <>
+                      {(() => {
+                        const m = participantsModal.match;
+                        const isCompleted = (m?.status || '').toLowerCase() === 'completed' && (m?.winner || '').trim();
+                        const pointResults = m?.pointResults && typeof m.pointResults === 'object' ? m.pointResults : null;
+                        const showPoints = isCompleted && pointResults;
+                        return (
+                          <>
+                            {showPoints && (
+                              <p className="muted participants-points-note">Points for this match (after winner declared):</p>
+                            )}
+                            <ul className="participants-list">
+                              <li className={`participants-list-header ${!showPoints ? 'participants-list-header-2col' : ''}`}>
+                                <span>User</span>
+                                <span>Prediction</span>
+                                {showPoints && <span className="col-points">Points</span>}
+                              </li>
+                              {participantsModal.participants.map((p, i) => {
+                                const pts = showPoints && p.userId ? pointResults[p.userId] : undefined;
+                                const ptsNum = pts != null && !Number.isNaN(Number(pts)) ? Number(pts) : null;
+                                return (
+                                  <li key={p.userId || i} className={`participant-item ${!showPoints ? 'participant-item-no-points' : ''}`}>
+                                    <span className="participant-name">{p.displayName}</span>
+                                    <span className="participant-prediction">{getTeamCode(p.predictedWinner, teams) || p.predictedWinner || '—'}</span>
+                                    {showPoints && (
+                                      <span className={`participant-points ${ptsNum != null && ptsNum >= 0 ? 'points-positive' : 'points-negative'}`}>
+                                        {ptsNum != null ? (ptsNum >= 0 ? '+' : '') + ptsNum : '—'}
+                                      </span>
+                                    )}
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          </>
+                        );
+                      })()}
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
             {answerModalQuestion && (
               <div className="modal-overlay" onClick={() => !submittingAnswer && setAnswerModalQuestion(null)}>
                 <div className="modal-content" onClick={e => e.stopPropagation()}>

@@ -481,6 +481,78 @@ button.stat-card.stat-card-clickable:hover {
   color: var(--text);
 }
 
+/* Today's matches modal with prediction selection */
+.modal-content.modal-today-matches {
+  max-width: 520px;
+}
+
+.today-matches-modal-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.today-match-modal-item {
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.today-match-modal-item:last-child {
+  border-bottom: none;
+}
+
+.today-match-modal-header {
+  margin-bottom: 0.75rem;
+}
+
+.today-match-modal-teams {
+  font-weight: 600;
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.today-match-modal-meta {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.today-match-modal-prediction {
+  margin-top: 0.5rem;
+}
+
+.today-match-modal-prediction label {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+  color: var(--text);
+}
+
+.today-match-modal-prediction .prediction-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.today-match-modal-prediction .saved-badge {
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+  color: var(--cricket-green);
+}
+
+.today-match-modal-closed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.today-match-modal-closed .match-winner-badge {
+  margin-left: 0.5rem;
+}
+
 .rules-section ul {
   padding-left: 1.5rem;
   line-height: 1.8;
@@ -1578,6 +1650,26 @@ button.stat-card.stat-card-clickable:hover {
   margin-left: 0.25rem;
 }
 
+.badge-pending {
+  display: inline-block;
+  background: #f59e0b;
+  color: #fff;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  margin-left: 0.25rem;
+}
+
+.badge-approved {
+  display: inline-block;
+  background: var(--cricket-green);
+  color: #fff;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  margin-left: 0.25rem;
+}
+
 .user-list-item .btn {
   margin-left: auto;
 }
@@ -1956,27 +2048,71 @@ button.stat-card.stat-card-clickable:hover {
   overflow-y: auto;
 }
 
+.participants-list > li {
+  list-style: none;
+}
+
+.participants-list-header {
+  display: grid;
+  grid-template-columns: 1fr auto 4rem;
+  gap: 1rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  border-bottom: 2px solid var(--border);
+  align-items: center;
+}
+
+.participants-list-header.participants-list-header-2col {
+  grid-template-columns: 1fr auto;
+}
+
+.participants-list-header .col-points {
+  text-align: right;
+}
+
 .participant-item {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 1fr auto 4rem;
+  gap: 1rem;
   align-items: center;
   padding: 0.6rem 0.75rem;
   border-bottom: 1px solid var(--border);
-  gap: 1rem;
 }
 
 .participant-item:last-child {
   border-bottom: none;
 }
 
+.participant-item.participant-item-no-points {
+  grid-template-columns: 1fr auto;
+}
+
 .participant-name {
   font-weight: 500;
   color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .participant-prediction {
   color: var(--cricket-green);
   font-weight: 600;
+  white-space: nowrap;
+}
+
+.participant-points {
+  font-weight: 600;
+  min-width: 3rem;
+  text-align: right;
+  justify-self: end;
+}
+
+.participants-points-note {
+  font-size: 0.85rem;
+  margin-bottom: 0.5rem;
 }
 
 .surrender-policy {
