@@ -438,15 +438,20 @@ export default function Dashboard() {
               const completedMatches = allMatches.filter(m =>
                 (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim()
               );
-              const participatedMatches = completedMatches.filter(m => {
+              /* Matches with saved prediction (increases as soon as user saves) */
+              const participatedMatches = allMatches.filter(m => {
                 const key = String(m.id);
                 return savedMatchIds.has(key) || !!(predictions[key] ?? predictions[m.id]);
               });
-              const wins = participatedMatches.filter(m => {
+              const completedParticipated = completedMatches.filter(m => {
+                const key = String(m.id);
+                return savedMatchIds.has(key) || !!(predictions[key] ?? predictions[m.id]);
+              });
+              const wins = completedParticipated.filter(m => {
                 const pred = predictions[String(m.id)] ?? predictions[m.id] ?? '';
                 return (pred || '').toString().toLowerCase().trim() === (m.winner || '').toLowerCase().trim();
               }).length;
-              const losses = participatedMatches.length - wins;
+              const losses = completedParticipated.length - wins;
               const totalPoints = leaderboard.find(u => u.id === user?.uid)?.points ?? 
                 completedMatches.reduce((sum, m) => sum + (m.pointResults?.[user?.uid] ?? 0), 0);
               const rankIdx = leaderboard.findIndex(u => u.id === user?.uid);
@@ -1279,18 +1284,19 @@ export default function Dashboard() {
               <button type="button" className="modal-close" onClick={() => setShowParticipatedModal(false)} aria-label="Close">&times;</button>
             </div>
             {(() => {
-              const completed = allMatches
-                .filter(m => (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim());
-              const participated = completed.filter(m => {
-                const key = String(m.id);
-                return savedMatchIds.has(key) || !!(predictions[key] ?? predictions[m.id]);
-              }).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+              const participated = allMatches
+                .filter(m => {
+                  const key = String(m.id);
+                  return savedMatchIds.has(key) || !!(predictions[key] ?? predictions[m.id]);
+                })
+                .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
               return participated.length === 0 ? (
                 <p className="muted">No participated matches yet.</p>
               ) : (
                 <ul className="points-history-list">
                   {participated.map((m) => {
                     const predicted = predictions[String(m.id)] ?? predictions[m.id] ?? '';
+                    const isCompleted = (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim();
                     return (
                       <li key={m.id} className="points-history-item">
                         <span className="points-history-match">
@@ -1298,6 +1304,9 @@ export default function Dashboard() {
                         </span>
                         <span className="points-history-detail">
                           Predicted: <strong>{getTeamCode(predicted, teams) || predicted || '—'}</strong>
+                          {isCompleted && (
+                            <span className="muted"> · Winner: {getTeamCode(m.winner, teams) || m.winner}</span>
+                          )}
                         </span>
                       </li>
                     );
