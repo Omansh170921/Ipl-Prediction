@@ -1,0 +1,36 @@
+name: Deploy Firebase Functions
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'functions/**'
+      - '.github/workflows/deploy-functions.yml'
+  workflow_dispatch:  # Allows manual run from GitHub Actions tab
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: functions
+
+      - name: Deploy to Firebase
+        uses: w9jds/firebase-action@master
+        with:
+          args: deploy --only functions --non-interactive
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          SCHEDULE_INTERVAL: ${{ secrets.SCHEDULE_INTERVAL }}
+          SCHEDULE_TIMEZONE: ${{ secrets.SCHEDULE_TIMEZONE }}

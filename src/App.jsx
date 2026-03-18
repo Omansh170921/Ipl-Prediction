@@ -13,16 +13,33 @@ import Dashboard from './pages/Dashboard';
 import Admin from './pages/Admin';
 import InsightApproval from './pages/InsightApproval';
 import './App.css';
-import { requestNotificationPermission } from './notification';
+import { requestNotificationPermission, saveFCMTokenToUser } from './notification';
 import { useEffect } from 'react';
+import { useAuth } from './context/AuthContext';
+
+function NotificationRegistration() {
+  const { user } = useAuth();
+
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    async function register() {
+      const token = await requestNotificationPermission();
+      if (token) {
+        await saveFCMTokenToUser(user.uid, token);
+      }
+    }
+    register();
+  }, [user?.uid]);
+
+  return null;
+}
 
 function App() {
-  useEffect(() => {
-    requestNotificationPermission();
-  }, []);
 
   return (
     <AuthProvider>
+      <NotificationRegistration />
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Landing />} />
