@@ -8,7 +8,7 @@ import { collection, query, where, getDocs, getDoc, doc, setDoc } from 'firebase
 import { db } from '../firebase/config';
 import Sidebar from '../components/Sidebar';
 import { toInitCap } from '../utils/format';
-import { calculateLeaderboard } from '../utils/points';
+import { calculateLeaderboard, to2Decimals } from '../utils/points';
 
 function formatMatchTime(time) {
   if (!time) return 'TBD';
@@ -319,11 +319,12 @@ export default function Dashboard() {
       if (activeSection !== 'leaderboard' && activeSection !== 'dashboard') return;
       setLeaderboardLoading(true);
       try {
-        const [usersSnap, matchesSnap, predsSnap, ptSnap] = await Promise.all([
+        const [usersSnap, matchesSnap, predsSnap, ptSnap, progSnap] = await Promise.all([
           getDocs(collection(db, 'users')).catch(() => ({ docs: [] })),
           getDocs(collection(db, 'matches')),
           getDocs(collection(db, 'predictions')),
           getDoc(doc(db, 'rules', 'pointRules')),
+          getDoc(doc(db, 'settings', 'programConfig')).catch(() => null),
         ]);
         const allUsers = (usersSnap?.docs || []).map(d => ({ id: d.id, ...d.data() }));
         const users = allUsers.filter(u => !u.isAdmin && u.isAdmin !== 'true');
@@ -335,8 +336,9 @@ export default function Dashboard() {
           predsByMatch[matchId].push({ userId, predictedWinner });
         });
         const rules = ptSnap.exists() ? ptSnap.data() : { notParticipatedPoints: 7, wrongPredictionPoints: 5 };
+        const programConfig = progSnap?.exists() ? { matchStartDate: progSnap.data().matchStartDate || '' } : { matchStartDate: '' };
         setPointRules(rules);
-        setLeaderboardRawData({ users, allMatches, predsByMatch, rules });
+        setLeaderboardRawData({ users, allMatches, predsByMatch, rules, programConfig });
       } catch (err) {
         console.error('Leaderboard fetch error:', err);
       }
@@ -347,7 +349,8 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!leaderboardRawData) return;
-    const { users, allMatches, predsByMatch, rules } = leaderboardRawData;
+    const { users, allMatches, predsByMatch, rules, programConfig } = leaderboardRawData;
+    const matchStartDate = (programConfig?.matchStartDate || '').trim();
     let completedMatches = allMatches.filter(m =>
       (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim()
     );
@@ -356,10 +359,19 @@ export default function Dashboard() {
     }
     completedMatches.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     const totals = calculateLeaderboard(completedMatches, users, predsByMatch, rules);
-    const sortedByPoints = users.map(u => ({
+    let sortedByPoints = users.map(u => ({
       ...u,
       points: totals[u.id] ?? 0,
     })).sort((a, b) => (b.points ?? 0) - (a.points ?? 0));
+    // Late users (added on/after match start date): assign bottom last user's points as single total, not match-wise
+    if (matchStartDate && sortedByPoints.length > 0) {
+      const bottomPoints = sortedByPoints[sortedByPoints.length - 1].points ?? 0;
+      sortedByPoints = sortedByPoints.map(u => {
+        const createdAtDate = (u.createdAt || '').toString().split('T')[0];
+        const isLateUser = createdAtDate && createdAtDate >= matchStartDate;
+        return isLateUser ? { ...u, points: bottomPoints, isLateUser: true } : { ...u, isLateUser: false };
+      }).sort((a, b) => (b.points ?? 0) - (a.points ?? 0));
+    }
     let rank = 1;
     const ranked = sortedByPoints.map((u, i) => {
       if (i > 0 && (sortedByPoints[i - 1].points ?? 0) > (u.points ?? 0)) rank += 1;
@@ -664,47 +676,52 @@ export default function Dashboard() {
             <h2>🏆 Leaderboard {!leaderboardLoading && (
               <span className="muted" style={{ fontWeight: 'normal', fontSize: '0.9em' }}>({leaderboard.length} users)</span>
             )}</h2>
-            <div className="filter-group" style={{ marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-              <button
-                type="button"
-                className={`filter-tag ${leaderboardTab === 'main' ? 'active' : ''}`}
-                onClick={() => setLeaderboardTab('main')}
-              >
-                Main
-              </button>
-              <button
-                type="button"
-                className={`filter-tag ${leaderboardTab === 'insights' ? 'active' : ''}`}
-                onClick={() => setLeaderboardTab('insights')}
-              >
-                Insights
-              </button>
-              <label htmlFor="leaderboard-date" style={{ marginLeft: 'auto' }}>Show points up to:</label>
-              <input
-                id="leaderboard-date"
-                type="date"
-                value={leaderboardDate || ''}
-                onChange={(e) => setLeaderboardDate(e.target.value || '')}
-                max={new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0]}
-                className="date-picker-input"
-                style={{ marginRight: '0.5rem' }}
-              />
-              <button
-                type="button"
-                className="btn btn-sm"
-                onClick={() => setLeaderboardDate('')}
-                title="Show all dates"
-              >
-                All dates
-              </button>
-              <button
-                type="button"
-                className={`filter-tag ${showWinnerLoser ? 'active' : ''}`}
-                onClick={() => setShowWinnerLoser(v => !v)}
-                title="Top 75% = winner 🏆, Bottom 25% = loser 📉"
-              >
-                {showWinnerLoser ? '🏆📉' : 'Show winner/loser'}
-              </button>
+            <div className="leaderboard-filters" style={{ marginBottom: '1rem' }}>
+              <div className="leaderboard-tab-row">
+                <button
+                  type="button"
+                  className={`filter-tag ${leaderboardTab === 'main' ? 'active' : ''}`}
+                  onClick={() => setLeaderboardTab('main')}
+                >
+                  Main
+                </button>
+                <button
+                  type="button"
+                  className={`filter-tag ${leaderboardTab === 'insights' ? 'active' : ''}`}
+                  onClick={() => setLeaderboardTab('insights')}
+                >
+                  Insights
+                </button>
+                <button
+                  type="button"
+                  className={`filter-tag ${showWinnerLoser ? 'active' : ''}`}
+                  onClick={() => setShowWinnerLoser(v => !v)}
+                  title="Top 75% = winner 🏆, Bottom 25% = loser 📉"
+                >
+                  {showWinnerLoser ? '🏆📉' : 'Show winner/loser'}
+                </button>
+              </div>
+              <div className="leaderboard-date-group">
+                <label htmlFor="leaderboard-date">Show points up to:</label>
+                <div className="leaderboard-date-inputs">
+                  <input
+                    id="leaderboard-date"
+                    type="date"
+                    value={leaderboardDate || ''}
+                    onChange={(e) => setLeaderboardDate(e.target.value || '')}
+                    max={new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0]}
+                    className="date-picker-input"
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => setLeaderboardDate('')}
+                    title="Show all dates"
+                  >
+                    All dates
+                  </button>
+                </div>
+              </div>
             </div>
             {leaderboardTab === 'main' && (
               <>
@@ -1323,7 +1340,7 @@ export default function Dashboard() {
                         </li>
                         {participantsModal.participants.map((p, i) => {
                     const pts = showPoints && p.userId ? pointResults[p.userId] : undefined;
-                    const ptsNum = pts != null && !Number.isNaN(Number(pts)) ? Number(pts) : null;
+                    const ptsNum = pts != null && !Number.isNaN(Number(pts)) ? to2Decimals(Number(pts)) : null;
                     return (
                       <li key={p.userId || i} className={`participant-item ${!showPoints ? 'participant-item-no-points' : ''}`}>
                         <span className="participant-name">{p.displayName}</span>
@@ -1364,17 +1381,18 @@ export default function Dashboard() {
                 <ul className="points-history-list">
                   {completed.map((m) => {
                     const predPoints = m.pointResults?.[user?.uid];
-                    const insightPts = insightPointsByMatch[m.id] ?? 0;
-                    const predVal = predPoints != null ? predPoints : 0;
-                    runningTotal += predVal + insightPts;
+                    const insightPts = to2Decimals(insightPointsByMatch[m.id] ?? 0);
+                    const predVal = predPoints != null ? Number(predPoints) : 0;
+                    runningTotal = to2Decimals(runningTotal + predVal + (insightPointsByMatch[m.id] ?? 0));
+                    const dispPred = predPoints != null ? to2Decimals(predPoints) : null;
                     return (
                       <li key={m.id} className="points-history-item">
                         <span className="points-history-match">
                           #{m.matchNumber || m.id} {getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)} ({m.date})
                         </span>
                         <span className="points-history-detail">
-                          {predPoints != null ? (
-                            <span className={predPoints >= 0 ? 'points-positive' : 'points-negative'}>Prediction: {predPoints >= 0 ? '+' : ''}{predPoints}</span>
+                          {dispPred != null ? (
+                            <span className={dispPred >= 0 ? 'points-positive' : 'points-negative'}>Prediction: {dispPred >= 0 ? '+' : ''}{dispPred}</span>
                           ) : (
                             <span className="muted">—</span>
                           )}
@@ -1403,6 +1421,20 @@ export default function Dashboard() {
             </div>
             {(() => {
               const matches = leaderboardRawData?.allMatches || [];
+              const progConfig = leaderboardRawData?.programConfig || {};
+              const matchStartDate = (progConfig.matchStartDate || '').trim();
+              const createdAtDate = (userPointHistoryModal.createdAt || '').toString().split('T')[0];
+              const isLateUser = matchStartDate && createdAtDate && createdAtDate >= matchStartDate;
+              if (isLateUser) {
+                const totalPts = userPointHistoryModal.points ?? 0;
+                return (
+                  <p className="muted">
+                    This user joined on or after match start date ({matchStartDate}). Points are allocated as the bottom ranked user total, not match-wise.
+                    <br />
+                    <strong>Total points: {to2Decimals(totalPts)}</strong>
+                  </p>
+                );
+              }
               let completed = matches
                 .filter(m => (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim())
                 .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
@@ -1417,17 +1449,18 @@ export default function Dashboard() {
                 <ul className="points-history-list">
                   {completed.map((m) => {
                     const predPoints = m.pointResults?.[uid];
-                    const predVal = predPoints != null ? predPoints : 0;
-                    runningTotal += predVal;
+                    const predVal = predPoints != null ? Number(predPoints) : 0;
+                    runningTotal = to2Decimals(runningTotal + predVal);
+                    const dispPts = predPoints != null ? to2Decimals(predPoints) : null;
                     return (
                       <li key={m.id} className="points-history-item">
                         <span className="points-history-match">
                           #{m.matchNumber || m.id} {getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)} ({m.date})
                         </span>
                         <span className="points-history-detail">
-                          {predPoints != null ? (
-                            <span className={predPoints >= 0 ? 'points-positive' : 'points-negative'}>
-                              {predPoints >= 0 ? '+' : ''}{predPoints}
+                          {dispPts != null ? (
+                            <span className={dispPts >= 0 ? 'points-positive' : 'points-negative'}>
+                              {dispPts >= 0 ? '+' : ''}{dispPts}
                             </span>
                           ) : (
                             <span className="muted">—</span>

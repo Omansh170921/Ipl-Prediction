@@ -1,4 +1,4 @@
-const to2Decimals = (n) => Math.round(Number(n) * 100) / 100;
+export const to2Decimals = (n) => Math.round(Number(n) * 100) / 100;
 
 /**
  * Calculate points for a completed match.

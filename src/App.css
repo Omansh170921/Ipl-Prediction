@@ -2412,6 +2412,50 @@ button.stat-card.stat-card-clickable:hover {
   font-size: 1rem;
 }
 
+.leaderboard-date-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.leaderboard-date-group label {
+  font-weight: 500;
+  color: var(--text);
+  margin: 0;
+  white-space: nowrap;
+}
+
+.leaderboard-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+}
+
+.leaderboard-tab-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.leaderboard-tab-row .filter-tag {
+  flex-shrink: 0;
+}
+
+.leaderboard-date-inputs {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.leaderboard-filters .filter-tag,
+.leaderboard-filters .btn {
+  flex-shrink: 0;
+}
+
 .muted {
   color: var(--muted);
   font-style: italic;
@@ -2691,28 +2735,92 @@ button.stat-card.stat-card-clickable:hover {
     justify-content: center;
   }
 
-  /* Leaderboard table - allow scroll or compact layout */
+  /* Leaderboard section - mobile layout */
+  .leaderboard-filters {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 1rem;
+  }
+
+  .leaderboard-tab-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  .leaderboard-tab-row .filter-tag {
+    flex-shrink: 0;
+    text-align: center;
+    padding: 0.5rem 0.75rem;
+  }
+
+  .leaderboard-date-group {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  .leaderboard-date-group label {
+    font-size: 0.9rem;
+    margin: 0;
+  }
+
+  .leaderboard-date-inputs {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .leaderboard-date-inputs .date-picker-input {
+    flex: 1;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  .leaderboard-date-inputs .btn {
+    flex-shrink: 0;
+  }
+
+  /* Leaderboard table - allow scroll, fix alignment */
   .leaderboard-table {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+    min-width: 280px;
   }
 
   .leaderboard-header,
   .leaderboard-row {
-    grid-template-columns: 36px 1fr 60px;
+    grid-template-columns: 40px minmax(80px, 1fr) 70px;
     gap: 0.5rem;
-    padding: 0.6rem 0.5rem;
-    font-size: 0.85rem;
-    min-width: 0;
+    padding: 0.65rem 0.75rem;
+    font-size: 0.875rem;
+    min-width: 280px;
   }
 
   .leaderboard-table.leaderboard-with-wl .leaderboard-header,
   .leaderboard-table.leaderboard-with-wl .leaderboard-row {
-    grid-template-columns: 36px 1fr 60px 36px;
+    grid-template-columns: 40px minmax(80px, 1fr) 70px 36px;
+    min-width: 320px;
+  }
+
+  .leaderboard-username-btn {
+    text-align: left;
+    word-break: break-word;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .leaderboard-summary {
     font-size: 0.9rem;
+  }
+
+  .rules-section.leaderboard-section h2 {
+    font-size: 1.1rem;
+    word-break: break-word;
   }
 
   /* Account section */
