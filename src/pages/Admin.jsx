@@ -437,14 +437,21 @@ export default function Admin() {
       const winners = answersSnap.docs
         .map(d => ({ ...d.data(), id: d.id }))
         .filter(a => String(a.answer || '').trim().toLowerCase() === correctAnswerNorm);
-      for (const w of winners) {
-        const uid = w.userId;
-        if (!uid) continue;
-        await updateDoc(doc(db, 'users', uid), { insightPoints: increment(1) });
+      const matchId = q.matchId;
+      if (matchId) {
+        const updates = {};
+        winners.forEach(w => {
+          if (w.userId) updates[`insightPointResults.${w.userId}`] = increment(1);
+        });
+        if (Object.keys(updates).length > 0) {
+          await updateDoc(doc(db, 'matches', matchId), updates);
+        }
+      } else {
+        setMessage('Question has no matchId. Points not awarded.');
       }
       setAnswerModalQuestion(null);
       setCorrectAnswerInput('');
-      setMessage(`Correct answer set. ${winners.length} user(s) who answered correctly awarded +1 insight point.`);
+      setMessage(`Correct answer set. ${winners.length} user(s) who answered correctly awarded +1 insight point${matchId ? '' : ' (no matchId)'}.`);
       setQuestionsAwaitingAnswer(prev => prev.filter(p => p.id !== q.id));
     } catch (err) {
       setMessage('Error setting answer: ' + (err.message || ''));

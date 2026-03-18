@@ -2336,6 +2336,16 @@ button.stat-card.stat-card-clickable:hover {
   align-items: center;
 }
 
+.leaderboard-table.leaderboard-with-wl .leaderboard-header,
+.leaderboard-table.leaderboard-with-wl .leaderboard-row {
+  grid-template-columns: 60px 1fr 80px 44px;
+}
+
+.leaderboard-wl-symbol {
+  font-size: 1.2rem;
+  text-align: center;
+}
+
 .leaderboard-header {
   background: var(--cricket-light);
   font-weight: 600;
@@ -2348,6 +2358,23 @@ button.stat-card.stat-card-clickable:hover {
 
 .leaderboard-row.current-user {
   background: rgba(46, 125, 50, 0.1);
+}
+
+.leaderboard-username-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  color: var(--cricket-green);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.leaderboard-username-btn:hover {
+  color: var(--btn-primary);
 }
 
 .points-positive {
@@ -2677,6 +2704,11 @@ button.stat-card.stat-card-clickable:hover {
     padding: 0.6rem 0.5rem;
     font-size: 0.85rem;
     min-width: 0;
+  }
+
+  .leaderboard-table.leaderboard-with-wl .leaderboard-header,
+  .leaderboard-table.leaderboard-with-wl .leaderboard-row {
+    grid-template-columns: 36px 1fr 60px 36px;
   }
 
   .leaderboard-summary {

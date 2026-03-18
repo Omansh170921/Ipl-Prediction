@@ -56,12 +56,13 @@ export default function Dashboard() {
   const [allMatches, setAllMatches] = useState([]);
   const [rules, setRules] = useState([]);
   const [predictions, setPredictions] = useState({});
+  const [savedPredictions, setSavedPredictions] = useState({});
   const [savedMatchIds, setSavedMatchIds] = useState(new Set());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(null);
   const [selectedMatchFilter, setSelectedMatchFilter] = useState('All');
   const [selectedHistoryMatchFilter, setSelectedHistoryMatchFilter] = useState('All');
-  const [showCompleted, setShowCompleted] = useState(true);
+  const [selectedTeamFilter, setSelectedTeamFilter] = useState('All');
   const [expandedTeamId, setExpandedTeamId] = useState(null);
   const [activeTab, setActiveTab] = useState('today');
   const [activeSection, setActiveSection] = useState('dashboard');
@@ -70,9 +71,13 @@ export default function Dashboard() {
   const [leaderboard, setLeaderboard] = useState([]);
   const [insightLeaderboard, setInsightLeaderboard] = useState([]);
   const [leaderboardTab, setLeaderboardTab] = useState('main');
+  const [leaderboardDate, setLeaderboardDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [leaderboardRawData, setLeaderboardRawData] = useState(null);
   const [pointRules, setPointRules] = useState({ notParticipatedPoints: 7, wrongPredictionPoints: 5 });
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
   const [leaderboardRefresh, setLeaderboardRefresh] = useState(0);
+  const [userPointHistoryModal, setUserPointHistoryModal] = useState(null);
+  const [showWinnerLoser, setShowWinnerLoser] = useState(true);
   const [matchesRefresh, setMatchesRefresh] = useState(0);
   const [surrenderDeadline, setSurrenderDeadline] = useState(null);
   const [surrenderLoading, setSurrenderLoading] = useState(false);
@@ -145,8 +150,19 @@ export default function Dashboard() {
   };
 
   const applyFiltersHistory = (list) => {
-    if (selectedHistoryMatchFilter === 'All') return list;
-    return list.filter(m => m.id === selectedHistoryMatchFilter);
+    let result = list;
+    if (selectedHistoryMatchFilter !== 'All') {
+      result = result.filter(m => m.id === selectedHistoryMatchFilter);
+    }
+    if (selectedTeamFilter !== 'All' && selectedTeamFilter) {
+      const teamNorm = (selectedTeamFilter || '').toLowerCase().trim();
+      result = result.filter(m => {
+        const t1 = (m.team1 || '').toLowerCase().trim();
+        const t2 = (m.team2 || '').toLowerCase().trim();
+        return t1 === teamNorm || t2 === teamNorm;
+      });
+    }
+    return result;
   };
 
   const sortMatches = (list) => {
@@ -172,9 +188,7 @@ export default function Dashboard() {
     ...allMatches.map(m => parseInt(String(m.matchNumber || '0'), 10)).filter(n => !isNaN(n)),
     allMatches.length
   );
-  const historyMatchesFiltered = showCompleted
-    ? historyMatchesRaw
-    : historyMatchesRaw.filter(m => (m.status || '').toLowerCase() !== 'completed');
+  const historyMatchesFiltered = historyMatchesRaw;
   const historyMatches = sortMatches(historyMatchesFiltered);
 
   useEffect(() => {
@@ -209,6 +223,7 @@ export default function Dashboard() {
         query(collection(db, 'predictions'), where('userId', '==', user.uid))
       );
       const preds = {};
+      const savedPreds = {};
       const savedIds = new Set();
       predSnap.docs.forEach(d => {
         const data = d.data();
@@ -216,10 +231,12 @@ export default function Dashboard() {
         if (mid != null) {
           const key = String(mid);
           preds[key] = data.predictedWinner;
+          savedPreds[key] = data.predictedWinner;
           savedIds.add(key);
         }
       });
       setPredictions(preds);
+      setSavedPredictions(savedPreds);
       setSavedMatchIds(savedIds);
 
       try {
@@ -255,6 +272,12 @@ export default function Dashboard() {
             /* ignore */
           }
         }
+        all.forEach(m => {
+          const stored = m.insightPointResults?.[user?.uid];
+          if (stored != null && stored !== undefined) {
+            pointsByMatch[m.id] = Number(stored);
+          }
+        });
         setInsightPointsByMatch(pointsByMatch);
       } catch {
         setInsightQuestionCount({});
@@ -305,9 +328,6 @@ export default function Dashboard() {
         const allUsers = (usersSnap?.docs || []).map(d => ({ id: d.id, ...d.data() }));
         const users = allUsers.filter(u => !u.isAdmin && u.isAdmin !== 'true');
         const allMatches = matchesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-        const completedMatches = allMatches.filter(m =>
-          (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim()
-        );
         const predsByMatch = {};
         predsSnap.docs.forEach(d => {
           const { matchId, userId, predictedWinner } = d.data();
@@ -316,26 +336,7 @@ export default function Dashboard() {
         });
         const rules = ptSnap.exists() ? ptSnap.data() : { notParticipatedPoints: 7, wrongPredictionPoints: 5 };
         setPointRules(rules);
-        const totals = calculateLeaderboard(completedMatches, users, predsByMatch, rules);
-        const sortedByPoints = users.map(u => ({
-          ...u,
-          points: totals[u.id] ?? 0,
-        })).sort((a, b) => (b.points ?? 0) - (a.points ?? 0));
-        let rank = 1;
-        const ranked = sortedByPoints.map((u, i) => {
-          if (i > 0 && (sortedByPoints[i - 1].points ?? 0) > (u.points ?? 0)) rank += 1;
-          return { ...u, rank };
-        });
-        setLeaderboard(ranked);
-        const sortedByInsight = [...users]
-          .map(u => ({ ...u, insightPoints: u.insightPoints ?? 0 }))
-          .sort((a, b) => (b.insightPoints ?? 0) - (a.insightPoints ?? 0));
-        rank = 1;
-        const insightRanked = sortedByInsight.map((u, i) => {
-          if (i > 0 && (sortedByInsight[i - 1].insightPoints ?? 0) > (u.insightPoints ?? 0)) rank += 1;
-          return { ...u, rank };
-        });
-        setInsightLeaderboard(insightRanked);
+        setLeaderboardRawData({ users, allMatches, predsByMatch, rules });
       } catch (err) {
         console.error('Leaderboard fetch error:', err);
       }
@@ -343,6 +344,52 @@ export default function Dashboard() {
     };
     fetchLeaderboard();
   }, [user, activeSection, leaderboardRefresh]);
+
+  useEffect(() => {
+    if (!leaderboardRawData) return;
+    const { users, allMatches, predsByMatch, rules } = leaderboardRawData;
+    let completedMatches = allMatches.filter(m =>
+      (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim()
+    );
+    if (leaderboardDate) {
+      completedMatches = completedMatches.filter(m => (m.date || '') <= leaderboardDate);
+    }
+    completedMatches.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    const totals = calculateLeaderboard(completedMatches, users, predsByMatch, rules);
+    const sortedByPoints = users.map(u => ({
+      ...u,
+      points: totals[u.id] ?? 0,
+    })).sort((a, b) => (b.points ?? 0) - (a.points ?? 0));
+    let rank = 1;
+    const ranked = sortedByPoints.map((u, i) => {
+      if (i > 0 && (sortedByPoints[i - 1].points ?? 0) > (u.points ?? 0)) rank += 1;
+      return { ...u, rank };
+    });
+    setLeaderboard(ranked);
+    let insightMatches = allMatches;
+    if (leaderboardDate) {
+      insightMatches = insightMatches.filter(m => (m.date || '') <= leaderboardDate);
+    }
+    const insightTotals = {};
+    users.forEach(u => { insightTotals[u.id] = 0; });
+    insightMatches.forEach(m => {
+      const ir = m.insightPointResults;
+      if (ir && typeof ir === 'object') {
+        Object.entries(ir).forEach(([uid, pts]) => {
+          insightTotals[uid] = (insightTotals[uid] || 0) + Number(pts || 0);
+        });
+      }
+    });
+    const sortedByInsight = [...users]
+      .map(u => ({ ...u, insightPoints: insightTotals[u.id] ?? 0 }))
+      .sort((a, b) => (b.insightPoints ?? 0) - (a.insightPoints ?? 0));
+    rank = 1;
+    const insightRanked = sortedByInsight.map((u, i) => {
+      if (i > 0 && (sortedByInsight[i - 1].insightPoints ?? 0) > (u.insightPoints ?? 0)) rank += 1;
+      return { ...u, rank };
+    });
+    setInsightLeaderboard(insightRanked);
+  }, [leaderboardRawData, leaderboardDate]);
 
   const handleChangePassword = async (e) => {
     e.preventDefault();
@@ -409,6 +456,7 @@ export default function Dashboard() {
       });
       const key = String(matchId);
       setPredictions(prev => ({ ...prev, [key]: predictedWinner }));
+      setSavedPredictions(prev => ({ ...prev, [key]: predictedWinner }));
       setSavedMatchIds(prev => new Set([...prev, key]));
     } catch (err) {
       alert(err.message);
@@ -613,8 +661,10 @@ export default function Dashboard() {
 
         {activeSection === 'leaderboard' && (
           <section className="rules-section leaderboard-section">
-            <h2>🏆 Leaderboard</h2>
-            <div className="filter-group" style={{ marginBottom: '1rem' }}>
+            <h2>🏆 Leaderboard {!leaderboardLoading && (
+              <span className="muted" style={{ fontWeight: 'normal', fontSize: '0.9em' }}>({leaderboard.length} users)</span>
+            )}</h2>
+            <div className="filter-group" style={{ marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
               <button
                 type="button"
                 className={`filter-tag ${leaderboardTab === 'main' ? 'active' : ''}`}
@@ -628,6 +678,32 @@ export default function Dashboard() {
                 onClick={() => setLeaderboardTab('insights')}
               >
                 Insights
+              </button>
+              <label htmlFor="leaderboard-date" style={{ marginLeft: 'auto' }}>Show points up to:</label>
+              <input
+                id="leaderboard-date"
+                type="date"
+                value={leaderboardDate || ''}
+                onChange={(e) => setLeaderboardDate(e.target.value || '')}
+                max={new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0]}
+                className="date-picker-input"
+                style={{ marginRight: '0.5rem' }}
+              />
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => setLeaderboardDate('')}
+                title="Show all dates"
+              >
+                All dates
+              </button>
+              <button
+                type="button"
+                className={`filter-tag ${showWinnerLoser ? 'active' : ''}`}
+                onClick={() => setShowWinnerLoser(v => !v)}
+                title="Top 75% = winner 🏆, Bottom 25% = loser 📉"
+              >
+                {showWinnerLoser ? '🏆📉' : 'Show winner/loser'}
               </button>
             </div>
             {leaderboardTab === 'main' && (
@@ -659,19 +735,40 @@ export default function Dashboard() {
                     >
                       🔄 Refresh
                     </button>
-                    <div className="leaderboard-table">
+                    <div className={`leaderboard-table ${showWinnerLoser ? 'leaderboard-with-wl' : ''}`}>
                       <div className="leaderboard-header">
                         <span>Rank</span>
                         <span>User</span>
                         <span>Points</span>
+                        {showWinnerLoser && <span title="Top 75% winner, Bottom 25% loser">W/L</span>}
                       </div>
-                      {leaderboard.map((u) => (
-                        <div key={u.id} className={`leaderboard-row ${u.id === user?.uid ? 'current-user' : ''}`}>
-                          <span>#{u.rank}</span>
-                          <span>{toInitCap(u.username || u.email || 'User')}</span>
-                          <span className={u.points >= 0 ? 'points-positive' : 'points-negative'}>{u.points}</span>
-                        </div>
-                      ))}
+                      {(() => {
+                        const n = leaderboard.length;
+                        const loserCount = n > 0 ? Math.ceil(n * 0.25) : 0;
+                        const winnerCount = n - loserCount;
+                        return leaderboard.map((u, idx) => {
+                          const isWinner = idx < winnerCount;
+                          return (
+                            <div key={u.id} className={`leaderboard-row ${u.id === user?.uid ? 'current-user' : ''}`}>
+                              <span>#{u.rank}</span>
+                              <button
+                                type="button"
+                                className="leaderboard-username-btn"
+                                onClick={() => setUserPointHistoryModal(u)}
+                                title="View point history"
+                              >
+                                {toInitCap(u.username || u.email || 'User')}
+                              </button>
+                              <span className={u.points >= 0 ? 'points-positive' : 'points-negative'}>{u.points}</span>
+                              {showWinnerLoser && (
+                                <span title={isWinner ? 'Winner (top 75%)' : 'Loser (bottom 25%)'} className="leaderboard-wl-symbol">
+                                  {isWinner ? '🏆' : '📉'}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        });
+                      })()}
                     </div>
                   </>
                 )}
@@ -706,19 +803,33 @@ export default function Dashboard() {
                     >
                       🔄 Refresh
                     </button>
-                    <div className="leaderboard-table">
+                    <div className={`leaderboard-table ${showWinnerLoser ? 'leaderboard-with-wl' : ''}`}>
                       <div className="leaderboard-header">
                         <span>Rank</span>
                         <span>User</span>
                         <span>Insight Points</span>
+                        {showWinnerLoser && <span title="Top 75% winner, Bottom 25% loser">W/L</span>}
                       </div>
-                      {insightLeaderboard.map((u) => (
-                        <div key={u.id} className={`leaderboard-row ${u.id === user?.uid ? 'current-user' : ''}`}>
-                          <span>#{u.rank}</span>
-                          <span>{toInitCap(u.username || u.email || 'User')}</span>
-                          <span className="points-positive">{u.insightPoints ?? 0}</span>
-                        </div>
-                      ))}
+                      {(() => {
+                        const n = insightLeaderboard.length;
+                        const loserCount = n > 0 ? Math.ceil(n * 0.25) : 0;
+                        const winnerCount = n - loserCount;
+                        return insightLeaderboard.map((u, idx) => {
+                          const isWinner = idx < winnerCount;
+                          return (
+                            <div key={u.id} className={`leaderboard-row ${u.id === user?.uid ? 'current-user' : ''}`}>
+                              <span>#{u.rank}</span>
+                              <span>{toInitCap(u.username || u.email || 'User')}</span>
+                              <span className="points-positive">{u.insightPoints ?? 0}</span>
+                              {showWinnerLoser && (
+                                <span title={isWinner ? 'Winner (top 75%)' : 'Loser (bottom 25%)'} className="leaderboard-wl-symbol">
+                                  {isWinner ? '🏆' : '📉'}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        });
+                      })()}
                     </div>
                   </>
                 )}
@@ -807,13 +918,6 @@ export default function Dashboard() {
               onClick={() => setActiveTab('history')}
             >
               All Matches History
-            </button>
-            <button
-              type="button"
-              className={`dashboard-tab dashboard-tab-action ${showCompleted ? 'active' : ''}`}
-              onClick={() => setShowCompleted(prev => !prev)}
-            >
-              {showCompleted ? 'Hide completed' : 'Show completed'}
             </button>
           </div>
 
@@ -913,7 +1017,6 @@ export default function Dashboard() {
                         onChange={(e) => {
                           const val = e.target.value;
                           setPredictions(prev => ({ ...prev, [match.id]: val }));
-                          setSavedMatchIds(prev => { const next = new Set(prev); next.delete(match.id); return next; });
                         }}
                         disabled={saving === match.id}
                       >
@@ -932,9 +1035,10 @@ export default function Dashboard() {
                     </>
                     )}
                   </div>
-                  {predictions[match.id] && savedMatchIds.has(match.id) && (
-                    <p className="saved-badge">✓ Saved: {getTeamCode(predictions[match.id], teams)}</p>
-                  )}
+                  {savedMatchIds.has(String(match.id)) && (() => {
+                    const savedVal = savedPredictions[String(match.id)] ?? savedPredictions[match.id] ?? predictions[match.id];
+                    return savedVal ? <p className="saved-badge">✓ Saved: {getTeamCode(savedVal, teams)}</p> : null;
+                  })()}
                   {cricketInsightsConfig.enabled && expandedInsightMatchId === match.id && (
                     <div className="match-insights">
                       <CricketInsights matchId={match.id} matchDate={match.date} matchStatus={match.status} config={cricketInsightsConfig} />
@@ -964,21 +1068,39 @@ export default function Dashboard() {
               <h2>Matches History {matchFilterDate ? `(${matchFilterDate})` : '(all dates)'}</h2>
               {allMatches.length > 0 && (
                 <>
-                  <div className="filter-group filter-dropdown-group">
-                    <label htmlFor="history-match-filter">Match:</label>
-                    <select
-                      id="history-match-filter"
-                      value={selectedHistoryMatchFilter}
-                      onChange={(e) => setSelectedHistoryMatchFilter(e.target.value)}
-                      className="match-filter-select"
-                    >
-                      <option value="All">All matches</option>
-                      {matchOptionsHistory.map(mo => (
-                        <option key={mo.id} value={mo.id}>
-                          {mo.date} — {mo.label}
-                        </option>
-                      ))}
-                    </select>
+                  <div className="filter-group filter-dropdown-group" style={{ flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <label htmlFor="history-team-filter">Team:</label>
+                      <select
+                        id="history-team-filter"
+                        value={selectedTeamFilter}
+                        onChange={(e) => setSelectedTeamFilter(e.target.value)}
+                        className="match-filter-select"
+                      >
+                        <option value="All">All teams</option>
+                        {teams.map(t => (
+                          <option key={t.id} value={t.name || ''}>
+                            {getTeamCode(t.name, teams) || t.name || t.code || t.id}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <label htmlFor="history-match-filter">Match:</label>
+                      <select
+                        id="history-match-filter"
+                        value={selectedHistoryMatchFilter}
+                        onChange={(e) => setSelectedHistoryMatchFilter(e.target.value)}
+                        className="match-filter-select"
+                      >
+                        <option value="All">All matches</option>
+                        {matchOptionsHistory.map(mo => (
+                          <option key={mo.id} value={mo.id}>
+                            {mo.date} — {mo.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 </>
               )}
@@ -986,7 +1108,11 @@ export default function Dashboard() {
                 <p>Loading matches...</p>
               ) : historyMatches.length === 0 ? (
                 <p className="no-matches">
-                  {allMatches.length === 0 ? 'No matches yet. Check back later!' : 'No matches match your filters. Try a different match.'}
+                  {allMatches.length === 0
+                    ? 'No matches yet. Check back later!'
+                    : selectedTeamFilter !== 'All' && selectedTeamFilter
+                      ? 'No matches found for the selected team.'
+                      : 'No matches match your filters. Try a different match.'}
                 </p>
               ) : (
                 <div className="matches-grid history-grid">
@@ -1037,9 +1163,12 @@ export default function Dashboard() {
                         </h3>
                         {match.winner && <p className="match-winner-badge">🏆 Winner: {getTeamCode(match.winner, teams)}</p>}
                       </div>
-                      {predictions[match.id] && (
-                        <p className="saved-badge">✓ Your prediction: {getTeamCode(predictions[match.id], teams)}</p>
-                      )}
+                      {(() => {
+                        const displayVal = savedMatchIds.has(String(match.id))
+                          ? (savedPredictions[String(match.id)] ?? savedPredictions[match.id])
+                          : predictions[match.id];
+                        return displayVal ? <p className="saved-badge">✓ Your prediction: {getTeamCode(displayVal, teams)}</p> : null;
+                      })()}
                       <div className="match-points-row">
                         {match.pointResults && match.pointResults[user?.uid] != null && (
                           <p className="match-points-badge">
@@ -1265,6 +1394,57 @@ export default function Dashboard() {
         document.body
       )}
 
+      {userPointHistoryModal && createPortal(
+        <div className="modal-overlay" onClick={() => setUserPointHistoryModal(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Point History — {toInitCap(userPointHistoryModal.username || userPointHistoryModal.email || 'User')}</h3>
+              <button type="button" className="modal-close" onClick={() => setUserPointHistoryModal(null)} aria-label="Close">&times;</button>
+            </div>
+            {(() => {
+              const matches = leaderboardRawData?.allMatches || [];
+              let completed = matches
+                .filter(m => (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim())
+                .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+              if (leaderboardDate) {
+                completed = completed.filter(m => (m.date || '') <= leaderboardDate);
+              }
+              const uid = userPointHistoryModal.id;
+              let runningTotal = 0;
+              return completed.length === 0 ? (
+                <p className="muted">No completed matches for the selected date range.</p>
+              ) : (
+                <ul className="points-history-list">
+                  {completed.map((m) => {
+                    const predPoints = m.pointResults?.[uid];
+                    const predVal = predPoints != null ? predPoints : 0;
+                    runningTotal += predVal;
+                    return (
+                      <li key={m.id} className="points-history-item">
+                        <span className="points-history-match">
+                          #{m.matchNumber || m.id} {getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)} ({m.date})
+                        </span>
+                        <span className="points-history-detail">
+                          {predPoints != null ? (
+                            <span className={predPoints >= 0 ? 'points-positive' : 'points-negative'}>
+                              {predPoints >= 0 ? '+' : ''}{predPoints}
+                            </span>
+                          ) : (
+                            <span className="muted">—</span>
+                          )}
+                          <span className="points-history-total"> → {runningTotal}</span>
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              );
+            })()}
+          </div>
+        </div>,
+        document.body
+      )}
+
       {showWinsLossesModal && createPortal(
         <div className="modal-overlay" onClick={() => setShowWinsLossesModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -1366,7 +1546,6 @@ export default function Dashboard() {
                               onChange={(e) => {
                                 const val = e.target.value;
                                 setPredictions(prev => ({ ...prev, [m.id]: val }));
-                                setSavedMatchIds(prev => { const next = new Set(prev); next.delete(m.id); return next; });
                               }}
                               disabled={saving === m.id}
                             >
@@ -1382,9 +1561,10 @@ export default function Dashboard() {
                               {saving === m.id ? 'Saving...' : 'Save'}
                             </button>
                           </div>
-                          {predicted && savedMatchIds.has(m.id) && (
-                            <p className="saved-badge">✓ Saved: {getTeamCode(predicted, teams)}</p>
-                          )}
+                          {savedMatchIds.has(String(m.id)) && (() => {
+                            const savedVal = savedPredictions[String(m.id)] ?? savedPredictions[m.id] ?? predicted;
+                            return savedVal ? <p className="saved-badge">✓ Saved: {getTeamCode(savedVal, teams)}</p> : null;
+                          })()}
                         </div>
                       ) : (
                         <div className="today-match-modal-closed">
