@@ -1079,6 +1079,12 @@ button.stat-card.stat-card-clickable:hover {
   box-shadow: 0 4px 20px rgba(0,0,0,0.1);
 }
 
+.users-count-badge {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
 .admin-section h2 {
   color: var(--cricket-green);
   margin-bottom: 1rem;

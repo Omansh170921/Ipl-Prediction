@@ -1542,7 +1542,7 @@ export default function Admin() {
 
           {activeSection === 'users' && (
           <section id="section-users" className="admin-section">
-            <h2>Users</h2>
+            <h2>Users <span className="users-count-badge">({allUsers.length} total)</span></h2>
             <p className="muted">Remove users to revoke app access. Users who registered on or after the match start date need approval before they can predict. Admins cannot remove themselves.</p>
             {usersFetchError ? (
               <p className="alert alert-error">{usersFetchError}</p>
