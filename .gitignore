@@ -15,6 +15,9 @@ dist
 dist-ssr
 *.local
 
+# Generated - config injected from .env at build time
+public/firebase-messaging-sw.js
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -1,15 +1,15 @@
 /* eslint-disable */
-// Auto-generated - do not edit. Config from .env
+// Auto-generated from template - config injected from .env at build time
 importScripts('https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging-compat.js');
 
 firebase.initializeApp({
-  apiKey: 'AIzaSyCnevLfquFHcDVQwSDY-nPmMs7UqdZWSvU',
-  authDomain: 'ipl-prediction-29bd1.firebaseapp.com',
-  projectId: 'ipl-prediction-29bd1',
-  storageBucket: 'ipl-prediction-29bd1.firebasestorage.app',
-  messagingSenderId: '968719753773',
-  appId: '1:968719753773:web:f0580ae8ba17814a2b0ea4',
+  apiKey: '__VITE_FIREBASE_API_KEY__',
+  authDomain: '__VITE_FIREBASE_AUTH_DOMAIN__',
+  projectId: '__VITE_FIREBASE_PROJECT_ID__',
+  storageBucket: '__VITE_FIREBASE_STORAGE_BUCKET__',
+  messagingSenderId: '__VITE_FIREBASE_MESSAGING_SENDER_ID__',
+  appId: '__VITE_FIREBASE_APP_ID__',
 });
 
 const messaging = firebase.messaging();

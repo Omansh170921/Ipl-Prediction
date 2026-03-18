@@ -46,6 +46,8 @@ This guide walks you through setting up **scheduled push notifications** that se
 VITE_VAPID_PUBLIC_KEY=your-copied-vapid-key-here
 ```
 
+**Service worker config:** `public/firebase-messaging-sw.js` is generated at build time from `.env` (uses `VITE_FIREBASE_*` vars). Run `npm run dev` or `npm run build` to generate it.
+
 **Schedule (optional):** Add to `.env` to change when the reminder runs:
 - `SCHEDULE_INTERVAL` – e.g. `every 5 minutes`, `every 10 minutes`, `every 15 minutes`
 - `SCHEDULE_TIMEZONE` – e.g. `Asia/Kolkata` (default)
