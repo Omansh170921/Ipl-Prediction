@@ -79,13 +79,13 @@ export default function LoginPasswordOptions() {
       <div className="auth-card auth-card-wide">
         <h1>Change & Reset Password</h1>
         <p className="auth-hint">Change your password or reset it via OTP if you forgot.</p>
-        {location.state?.message && <div className="alert alert-success">{location.state.message}</div>}
-        {error && <div className="alert alert-error">{error}</div>}
+        {location.state?.message && <div className="alert alert-success alert-toast">{location.state.message}</div>}
+        {error && <div className="alert alert-error alert-toast">{error}</div>}
         <div className="login-password-sections">
           <div className="change-password-section">
             <h3>Change Password</h3>
             <p className="muted">Enter your email, current password, and new password. No limit applies.</p>
-            {cpSuccess && <div className="alert alert-success">{cpSuccess}</div>}
+            {cpSuccess && <div className="alert alert-success alert-toast">{cpSuccess}</div>}
             <form onSubmit={handleChangePassword}>
               <div className="form-group">
                 <label>Email</label>

@@ -336,7 +336,11 @@ export default function Dashboard() {
           predsByMatch[matchId].push({ userId, predictedWinner });
         });
         const rules = ptSnap.exists() ? ptSnap.data() : { notParticipatedPoints: 7, wrongPredictionPoints: 5 };
-        const programConfig = progSnap?.exists() ? { matchStartDate: progSnap.data().matchStartDate || '' } : { matchStartDate: '' };
+        const prog = progSnap?.exists() ? progSnap.data() : {};
+        const programConfig = {
+          matchStartDate: prog.matchStartDate || '',
+          loserPercent: Math.max(0, Math.min(50, parseInt(prog.loserPercent, 10) || 25)),
+        };
         setPointRules(rules);
         setLeaderboardRawData({ users, allMatches, predsByMatch, rules, programConfig });
       } catch (err) {
@@ -487,16 +491,23 @@ export default function Dashboard() {
         getDocs(collection(db, 'users')).catch(() => ({ docs: [] })),
       ]);
       const matchData = matchSnap?.exists?.() ? { id: matchSnap.id, ...matchSnap.data() } : match;
-      const userMap = {};
-      (usersSnap?.docs || []).forEach(d => { userMap[d.id] = d.data(); });
-      const participants = predsSnap.docs.map(d => {
+      const predMap = new Map();
+      predsSnap.docs.forEach(d => {
         const data = d.data();
         const userId = data.userId ?? data.uid ?? d.id?.split('_')?.[0];
-        const predictedWinner = data.predictedWinner;
-        const u = userMap[userId];
-        const displayName = u?.username ? toInitCap(String(u.username).replace(/_/g, ' ')) : (u?.email || userId || '—');
-        return { userId, predictedWinner, displayName };
+        predMap.set(userId, data.predictedWinner);
       });
+      const allUsersList = (usersSnap?.docs || []).filter(d => {
+        const u = d.data();
+        return !u.isAdmin && u.isAdmin !== 'true';
+      });
+      const participants = allUsersList.map(d => {
+        const userId = d.id;
+        const u = d.data();
+        const displayName = u?.username ? toInitCap(String(u.username).replace(/_/g, ' ')) : (u?.email || userId || '—');
+        const predictedWinner = predMap.get(userId) ?? null;
+        return { userId, predictedWinner, displayName };
+      }).sort((a, b) => (a.displayName || '').localeCompare(b.displayName || ''));
       setParticipantsModal(prev => prev && prev.match?.id === match.id ? { ...prev, match: matchData, participants } : prev);
     } catch (err) {
       console.error('Fetch participants error:', err);
@@ -539,7 +550,7 @@ export default function Dashboard() {
               const participatedMatches = allMatches.filter(m => savedMatchIds.has(String(m.id)));
               const completedParticipated = completedMatches.filter(m => savedMatchIds.has(String(m.id)));
               const wins = completedParticipated.filter(m => {
-                const pred = predictions[String(m.id)] ?? predictions[m.id] ?? '';
+                const pred = savedPredictions[String(m.id)] ?? savedPredictions[m.id] ?? '';
                 return (pred || '').toString().toLowerCase().trim() === (m.winner || '').toLowerCase().trim();
               }).length;
               const losses = completedParticipated.length - wins;
@@ -696,7 +707,7 @@ export default function Dashboard() {
                   type="button"
                   className={`filter-tag ${showWinnerLoser ? 'active' : ''}`}
                   onClick={() => setShowWinnerLoser(v => !v)}
-                  title="Top 75% = winner 🏆, Bottom 25% = loser 📉"
+                  title={`Top ${100 - (leaderboardRawData?.programConfig?.loserPercent ?? 25)}% = winner 🏆, Bottom ${leaderboardRawData?.programConfig?.loserPercent ?? 25}% = loser 📉`}
                 >
                   {showWinnerLoser ? '🏆📉' : 'Show winner/loser'}
                 </button>
@@ -757,12 +768,14 @@ export default function Dashboard() {
                         <span>Rank</span>
                         <span>User</span>
                         <span>Points</span>
-                        {showWinnerLoser && <span title="Top 75% winner, Bottom 25% loser">W/L</span>}
+                        {showWinnerLoser && <span title={`Top ${100 - (leaderboardRawData?.programConfig?.loserPercent ?? 25)}% winner, Bottom ${leaderboardRawData?.programConfig?.loserPercent ?? 25}% loser`}>W/L</span>}
                       </div>
                       {(() => {
                         const n = leaderboard.length;
-                        const loserCount = n > 0 ? Math.ceil(n * 0.25) : 0;
+                        const loserPct = (leaderboardRawData?.programConfig?.loserPercent ?? 25) / 100;
+                        const loserCount = n > 0 ? Math.ceil(n * loserPct) : 0;
                         const winnerCount = n - loserCount;
+                        const winnerPct = 100 - (leaderboardRawData?.programConfig?.loserPercent ?? 25);
                         return leaderboard.map((u, idx) => {
                           const isWinner = idx < winnerCount;
                           return (
@@ -778,7 +791,7 @@ export default function Dashboard() {
                               </button>
                               <span className={u.points >= 0 ? 'points-positive' : 'points-negative'}>{u.points}</span>
                               {showWinnerLoser && (
-                                <span title={isWinner ? 'Winner (top 75%)' : 'Loser (bottom 25%)'} className="leaderboard-wl-symbol">
+                                <span title={isWinner ? `Winner (top ${winnerPct}%)` : `Loser (bottom ${leaderboardRawData?.programConfig?.loserPercent ?? 25}%)`} className="leaderboard-wl-symbol">
                                   {isWinner ? '🏆' : '📉'}
                                 </span>
                               )}
@@ -825,12 +838,14 @@ export default function Dashboard() {
                         <span>Rank</span>
                         <span>User</span>
                         <span>Insight Points</span>
-                        {showWinnerLoser && <span title="Top 75% winner, Bottom 25% loser">W/L</span>}
+                        {showWinnerLoser && <span title={`Top ${100 - (leaderboardRawData?.programConfig?.loserPercent ?? 25)}% winner, Bottom ${leaderboardRawData?.programConfig?.loserPercent ?? 25}% loser`}>W/L</span>}
                       </div>
                       {(() => {
                         const n = insightLeaderboard.length;
-                        const loserCount = n > 0 ? Math.ceil(n * 0.25) : 0;
+                        const loserPct = (leaderboardRawData?.programConfig?.loserPercent ?? 25) / 100;
+                        const loserCount = n > 0 ? Math.ceil(n * loserPct) : 0;
                         const winnerCount = n - loserCount;
+                        const loserVal = leaderboardRawData?.programConfig?.loserPercent ?? 25;
                         return insightLeaderboard.map((u, idx) => {
                           const isWinner = idx < winnerCount;
                           return (
@@ -839,7 +854,7 @@ export default function Dashboard() {
                               <span>{toInitCap(u.username || u.email || 'User')}</span>
                               <span className="points-positive">{u.insightPoints ?? 0}</span>
                               {showWinnerLoser && (
-                                <span title={isWinner ? 'Winner (top 75%)' : 'Loser (bottom 25%)'} className="leaderboard-wl-symbol">
+                                <span title={isWinner ? `Winner (top ${100 - loserVal}%)` : `Loser (bottom ${loserVal}%)`} className="leaderboard-wl-symbol">
                                   {isWinner ? '🏆' : '📉'}
                                 </span>
                               )}
@@ -1053,7 +1068,7 @@ export default function Dashboard() {
                     )}
                   </div>
                   {savedMatchIds.has(String(match.id)) && (() => {
-                    const savedVal = savedPredictions[String(match.id)] ?? savedPredictions[match.id] ?? predictions[match.id];
+                    const savedVal = savedPredictions[String(match.id)] ?? savedPredictions[match.id];
                     return savedVal ? <p className="saved-badge">✓ Saved: {getTeamCode(savedVal, teams)}</p> : null;
                   })()}
                   {cricketInsightsConfig.enabled && expandedInsightMatchId === match.id && (
@@ -1183,7 +1198,7 @@ export default function Dashboard() {
                       {(() => {
                         const displayVal = savedMatchIds.has(String(match.id))
                           ? (savedPredictions[String(match.id)] ?? savedPredictions[match.id])
-                          : predictions[match.id];
+                          : null;
                         return displayVal ? <p className="saved-badge">✓ Your prediction: {getTeamCode(displayVal, teams)}</p> : null;
                       })()}
                       <div className="match-points-row">
@@ -1220,7 +1235,7 @@ export default function Dashboard() {
               <button type="button" className="modal-close" onClick={() => !cpLoading && setShowChangePasswordModal(false)} aria-label="Close">&times;</button>
             </div>
             {cpMessage && (
-              <div className={`alert ${cpMessage.includes('success') ? 'alert-success' : 'alert-error'}`}>
+              <div className={`alert alert-toast ${cpMessage.includes('success') ? 'alert-success' : 'alert-error'}`}>
                 {cpMessage}
               </div>
             )}
@@ -1283,7 +1298,7 @@ export default function Dashboard() {
                 <p>You can surrender until <strong>{surrenderDeadline}</strong>. Today is {today}.</p>
               )}
             </div>
-            {surrenderError && <div className="alert alert-error">{surrenderError}</div>}
+            {surrenderError && <div className="alert alert-error alert-toast">{surrenderError}</div>}
             <div className="surrender-confirm">
               {surrenderDeadline && today > surrenderDeadline ? (
                 <p className="surrender-period-ended">The surrender period has ended ({surrenderDeadline}). You can no longer surrender your account.</p>
@@ -1319,7 +1334,7 @@ export default function Dashboard() {
             ) : participantsModal.error ? (
               <p className="alert alert-error">{participantsModal.error}</p>
             ) : !participantsModal.participants || participantsModal.participants.length === 0 ? (
-              <p className="muted">No participants have made a prediction for this match.</p>
+              <p className="muted">No users registered yet.</p>
             ) : (
               <>
                 {(() => {
@@ -1344,7 +1359,7 @@ export default function Dashboard() {
                     return (
                       <li key={p.userId || i} className={`participant-item ${!showPoints ? 'participant-item-no-points' : ''}`}>
                         <span className="participant-name">{p.displayName}</span>
-                        <span className="participant-prediction">{getTeamCode(p.predictedWinner, teams) || p.predictedWinner || '—'}</span>
+                        <span className="participant-prediction">{p.predictedWinner ? (getTeamCode(p.predictedWinner, teams) || p.predictedWinner) : '—'}</span>
                         {showPoints && (
                           <span className={`participant-points ${ptsNum != null && ptsNum >= 0 ? 'points-positive' : 'points-negative'}`}>
                             {ptsNum != null ? (ptsNum >= 0 ? '+' : '') + ptsNum : '—'}
@@ -1501,7 +1516,7 @@ export default function Dashboard() {
                       <h4 style={{ marginTop: 0 }}>Wins &amp; Losses</h4>
                       <ul className="points-history-list">
                         {participated.map((m) => {
-                          const pred = (predictions[String(m.id)] ?? predictions[m.id] ?? '').toString().toLowerCase().trim();
+                          const pred = (savedPredictions[String(m.id)] ?? savedPredictions[m.id] ?? '').toString().toLowerCase().trim();
                           const winner = (m.winner || '').toLowerCase().trim();
                           const isWin = pred === winner;
                           return (
@@ -1595,17 +1610,20 @@ export default function Dashboard() {
                             </button>
                           </div>
                           {savedMatchIds.has(String(m.id)) && (() => {
-                            const savedVal = savedPredictions[String(m.id)] ?? savedPredictions[m.id] ?? predicted;
+                            const savedVal = savedPredictions[String(m.id)] ?? savedPredictions[m.id];
                             return savedVal ? <p className="saved-badge">✓ Saved: {getTeamCode(savedVal, teams)}</p> : null;
                           })()}
                         </div>
                       ) : (
                         <div className="today-match-modal-closed">
-                          {predicted ? (
-                            <span className="points-positive">Your prediction: <strong>{getTeamCode(predicted, teams) || predicted}</strong></span>
-                          ) : (
-                            <span className="muted">Prediction closed.</span>
-                          )}
+                          {(() => {
+                            const sv = savedPredictions[String(m.id)] ?? savedPredictions[m.id];
+                            return sv ? (
+                              <span className="points-positive">Your prediction: <strong>{getTeamCode(sv, teams) || sv}</strong></span>
+                            ) : (
+                              <span className="muted">Prediction closed.</span>
+                            );
+                          })()}
                           {m.winner && <span className="match-winner-badge">🏆 Winner: {getTeamCode(m.winner, teams)}</span>}
                         </div>
                       )}
@@ -1635,7 +1653,7 @@ export default function Dashboard() {
               ) : (
                 <ul className="points-history-list">
                   {participated.map((m) => {
-                    const predicted = predictions[String(m.id)] ?? predictions[m.id] ?? '';
+                    const predicted = savedPredictions[String(m.id)] ?? savedPredictions[m.id] ?? '';
                     const isCompleted = (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim();
                     return (
                       <li key={m.id} className="points-history-item">

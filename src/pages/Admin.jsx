@@ -162,7 +162,7 @@ export default function Admin() {
   const [activeSection, setActiveSection] = useState('matches');
   const [pointRules, setPointRules] = useState({ notParticipatedPoints: 7, wrongPredictionPoints: 5 });
   const [passwordPolicy, setPasswordPolicy] = useState({ maxPasswordChanges: 2, surrenderDeadline: '' });
-  const [programConfig, setProgramConfig] = useState({ matchStartDate: '' });
+  const [programConfig, setProgramConfig] = useState({ matchStartDate: '', scheduleIntervalMinutes: 10, loserPercent: 25 });
   const [cricketInsightsConfig, setCricketInsightsConfig] = useState({
     enabled: true,
     maxQuestionsPerUserPerMatch: 1,
@@ -202,16 +202,18 @@ export default function Admin() {
         getDocs(query(collection(db, 'predictions'), where('matchId', '==', match.id))),
       ]);
       const matchData = matchSnap?.exists?.() ? { id: matchSnap.id, ...matchSnap.data() } : match;
-      const userMap = {};
-      (allUsers || []).forEach(u => { userMap[u.id] = u; });
-      const participants = predsSnap.docs.map(d => {
+      const predMap = new Map();
+      predsSnap.docs.forEach(d => {
         const data = d.data();
         const userId = data.userId ?? data.uid ?? d.id?.split('_')?.[0];
-        const predictedWinner = data.predictedWinner;
-        const u = userMap[userId];
-        const displayName = u?.username ? toInitCap(String(u.username || '').replace(/_/g, ' ')) : (u?.email || userId || '—');
-        return { userId, predictedWinner, displayName };
+        predMap.set(userId, data.predictedWinner);
       });
+      const allUsersList = (allUsers || []).filter(u => !u.isAdmin && u.isAdmin !== 'true');
+      const participants = allUsersList.map(u => {
+        const displayName = u?.username ? toInitCap(String(u.username || '').replace(/_/g, ' ')) : (u?.email || u.id || '—');
+        const predictedWinner = predMap.get(u.id) ?? null;
+        return { userId: u.id, predictedWinner, displayName };
+      }).sort((a, b) => (a.displayName || '').localeCompare(b.displayName || ''));
       setParticipantsModal(prev => prev && prev.match?.id === match.id ? { ...prev, match: matchData, participants } : prev);
     } catch (err) {
       console.error('Fetch participants error:', err);
@@ -281,7 +283,11 @@ export default function Admin() {
         const progSnap = await getDoc(doc(db, 'settings', 'programConfig'));
         if (progSnap.exists()) {
           const d = progSnap.data();
-          setProgramConfig({ matchStartDate: d.matchStartDate || '' });
+          setProgramConfig({
+            matchStartDate: d.matchStartDate || '',
+            scheduleIntervalMinutes: d.scheduleIntervalMinutes ?? 10,
+            loserPercent: d.loserPercent ?? 25,
+          });
         }
       } catch {
         // use defaults
@@ -928,6 +934,8 @@ export default function Admin() {
       const maxPerUser = Math.max(1, Math.min(10, parseInt(cricketInsightsConfig.maxQuestionsPerUserPerMatch, 10) || 1));
       const maxPerMatch = Math.max(1, Math.min(20, parseInt(cricketInsightsConfig.maxQuestionsPerMatch, 10) || 5));
       const matchStartDate = (programConfig.matchStartDate || '').trim();
+      const scheduleInterval = Math.max(1, Math.min(60, parseInt(programConfig.scheduleIntervalMinutes, 10) || 10));
+      const loserPercent = Math.max(0, Math.min(50, parseInt(programConfig.loserPercent, 10) || 25));
       await Promise.all([
         setDoc(doc(db, 'rules', 'pointRules'), {
           notParticipatedPoints: notParticipated,
@@ -936,6 +944,8 @@ export default function Admin() {
         }),
         setDoc(doc(db, 'settings', 'programConfig'), {
           matchStartDate: matchStartDate || null,
+          scheduleIntervalMinutes: scheduleInterval,
+          loserPercent: loserPercent,
           updatedAt: new Date().toISOString(),
         }),
         setDoc(doc(db, 'settings', 'passwordPolicy'), {
@@ -968,7 +978,7 @@ export default function Admin() {
         }
       }
       setPointRules(prev => ({ ...prev, notParticipatedPoints: notParticipated, wrongPredictionPoints: wrongPrediction }));
-      setProgramConfig(prev => ({ ...prev, matchStartDate }));
+      setProgramConfig(prev => ({ ...prev, matchStartDate, scheduleIntervalMinutes: scheduleInterval, loserPercent }));
       setPasswordPolicy(prev => ({ ...prev, maxPasswordChanges: max, surrenderDeadline: deadline }));
       setCricketInsightsConfig(prev => ({ ...prev, enabled: cricketInsightsConfig.enabled, maxQuestionsPerUserPerMatch: maxPerUser, maxQuestionsPerMatch: maxPerMatch }));
       setMessage('Program config saved successfully');
@@ -992,7 +1002,7 @@ export default function Admin() {
         ) : (
         <div className="admin-content">
           {message && (
-            <div className="alert alert-success">
+            <div className={`alert alert-toast ${message.startsWith('Error') ? 'alert-error' : 'alert-success'}`}>
               {message}
             </div>
           )}
@@ -1392,6 +1402,28 @@ export default function Admin() {
                     />
                   </div>
                   <p className="muted config-note">Leave empty to allow all users to predict without approval.</p>
+                  <div className="config-item">
+                    <label>Push notification check interval (minutes):</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="60"
+                      value={programConfig.scheduleIntervalMinutes ?? 10}
+                      onChange={(e) => setProgramConfig(prev => ({ ...prev, scheduleIntervalMinutes: e.target.value }))}
+                    />
+                  </div>
+                  <p className="muted config-note">How often the prediction reminder is checked (1–60 min). Function runs every 5 min; this controls how often reminders are actually sent.</p>
+                  <div className="config-item">
+                    <label>Loser % (bottom of leaderboard):</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="50"
+                      value={programConfig.loserPercent ?? 25}
+                      onChange={(e) => setProgramConfig(prev => ({ ...prev, loserPercent: e.target.value }))}
+                    />
+                  </div>
+                  <p className="muted config-note">Bottom X% of leaderboard = loser 📉; top (100−X)% = winner 🏆. Default 25.</p>
                 </div>
                 <div className="config-card">
                   <h3>Point Rules</h3>
@@ -1716,6 +1748,11 @@ export default function Admin() {
                   </button>
                 </div>
                 <div className="matches-table">
+                  <div className="match-row match-row-header">
+                    <span className="match-col-check" aria-hidden="true" />
+                    <span className="match-col-info">Match</span>
+                    <span className="match-col-actions">Actions</span>
+                  </div>
                   {editingMatch && (
                     <form onSubmit={handleUpdateMatch} className="match-form edit-form">
                       <h4>Edit Match</h4>
@@ -1986,7 +2023,7 @@ export default function Admin() {
                   ) : participantsModal.error ? (
                     <p className="alert alert-error">{participantsModal.error}</p>
                   ) : !participantsModal.participants || participantsModal.participants.length === 0 ? (
-                    <p className="muted">No participants have made a prediction for this match.</p>
+                    <p className="muted">No users registered yet.</p>
                   ) : (
                     <>
                       {(() => {
@@ -2011,7 +2048,7 @@ export default function Admin() {
                                 return (
                                   <li key={p.userId || i} className={`participant-item ${!showPoints ? 'participant-item-no-points' : ''}`}>
                                     <span className="participant-name">{p.displayName}</span>
-                                    <span className="participant-prediction">{getTeamCode(p.predictedWinner, teams) || p.predictedWinner || '—'}</span>
+                                    <span className="participant-prediction">{p.predictedWinner ? (getTeamCode(p.predictedWinner, teams) || p.predictedWinner) : '—'}</span>
                                     {showPoints && (
                                       <span className={`participant-points ${ptsNum != null && ptsNum >= 0 ? 'points-positive' : 'points-negative'}`}>
                                         {ptsNum != null ? (ptsNum >= 0 ? '+' : '') + ptsNum : '—'}

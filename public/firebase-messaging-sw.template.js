@@ -15,6 +15,25 @@ firebase.initializeApp({
 const messaging = firebase.messaging();
 messaging.onBackgroundMessage((payload) => {
   const { title, body } = payload.notification || {};
-  const options = { body: body || '', icon: '/vite.svg' };
+  const data = payload.data || {};
+  const url = (data.url || '/dashboard').startsWith('/') ? (data.url || '/dashboard') : '/dashboard';
+  const options = { body: body || '', icon: '/vite.svg', data: { url } };
   self.registration.showNotification(title || 'IPL Prediction', options);
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const urlToOpen = event.notification.data?.url || '/dashboard';
+  const fullUrl = urlToOpen.startsWith('http') ? urlToOpen : new URL(urlToOpen, self.location.origin).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if (client.url.startsWith(self.location.origin) && 'focus' in client) {
+          client.navigate(fullUrl);
+          return client.focus();
+        }
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(fullUrl);
+    })
+  );
 });

@@ -45,7 +45,7 @@ export default function AdminLogin() {
     <div className="auth-page">
       <div className="auth-card admin-login">
         <h1>Admin Login</h1>
-        {error && <div className="alert alert-error">{error}</div>}
+        {error && <div className="alert alert-error alert-toast">{error}</div>}
         <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label>Admin Email</label>

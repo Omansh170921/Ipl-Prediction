@@ -97,8 +97,8 @@ export default function ForgotPasswordVerify() {
         <p className="auth-hint">
           Enter the 6-digit OTP sent to <strong>{pending.email}</strong> and your new password.
         </p>
-        {error && <div className="alert alert-error">{error}</div>}
-        {message && <div className="alert alert-success">{message}</div>}
+        {error && <div className="alert alert-error alert-toast">{error}</div>}
+        {message && <div className="alert alert-success alert-toast">{message}</div>}
         <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label>OTP Code</label>

@@ -60,8 +60,8 @@ export default function Login() {
       <div className="auth-card">
         <h1>Welcome Back</h1>
         <p className="auth-hint">Login with username or email</p>
-        {location.state?.message && <div className="alert alert-success">{location.state.message}</div>}
-        {error && <div className="alert alert-error">{error}</div>}
+        {location.state?.message && <div className="alert alert-success alert-toast">{location.state.message}</div>}
+        {error && <div className="alert alert-error alert-toast">{error}</div>}
         <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label>Username or Email</label>

@@ -47,7 +47,7 @@ export default function VerifyEmail() {
           We've sent a verification link to <strong>{user.email}</strong>
         </p>
         <p>Click the link in the email to verify your account. Then you can log in with your username and password.</p>
-        {message && <div className="alert alert-success">{message}</div>}
+        {message && <div className="alert alert-success alert-toast">{message}</div>}
         <button onClick={handleResend} className="btn btn-secondary" disabled={resent}>
           {resent ? 'Email Sent' : 'Resend Verification Email'}
         </button>

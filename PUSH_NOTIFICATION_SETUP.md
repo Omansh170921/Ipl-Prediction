@@ -17,7 +17,7 @@ This guide walks you through setting up **scheduled push notifications** that se
 | **Source code** | `functions/` folder (index.js, package.json) |
 
 **Functions deployed:**
-1. `scheduledPredictionReminder` – runs every 10 min (IST), sends push 15 min before prediction cutoff (only to users who haven’t predicted yet)
+1. `scheduledPredictionReminder` – runs every 5 min; check interval from programConfig (Admin → Program Config). Sends push 15 min before prediction cutoff (only to users who haven’t predicted yet)
 2. `resetPasswordWithOTP` – existing function (unchanged)
 
 ---
@@ -48,11 +48,11 @@ VITE_VAPID_PUBLIC_KEY=your-copied-vapid-key-here
 
 **Service worker config:** `public/firebase-messaging-sw.js` is generated at build time from `.env` (uses `VITE_FIREBASE_*` vars). Run `npm run dev` or `npm run build` to generate it.
 
-**Schedule (optional):** Add to `.env` to change when the reminder runs:
-- `SCHEDULE_INTERVAL` – e.g. `every 5 minutes`, `every 10 minutes`, `every 15 minutes`
-- `SCHEDULE_TIMEZONE` – e.g. `Asia/Kolkata` (default)
+**Schedule interval:** Set in Admin Panel → Program Config → "Push notification check interval (minutes)" (1–60). The function runs every 5 minutes; this controls how often reminders are actually sent (e.g. 10 = check/send at most every 10 minutes).
 
-**Deploy via GitHub Actions:** See [.github/GITHUB_DEPLOY_SETUP.md](.github/GITHUB_DEPLOY_SETUP.md) to deploy automatically and control the schedule via GitHub secrets.
+**Timezone (optional):** Add `SCHEDULE_TIMEZONE` to `.env` (e.g. `Asia/Kolkata`, default).
+
+**Deploy via GitHub Actions:** See [.github/GITHUB_DEPLOY_SETUP.md](.github/GITHUB_DEPLOY_SETUP.md) to deploy automatically.
 
 ---
 

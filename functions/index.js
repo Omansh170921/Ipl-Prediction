@@ -8,19 +8,27 @@ const admin = require('firebase-admin');
 admin.initializeApp();
 
 /**
- * Scheduled push notification. Interval from .env SCHEDULE_INTERVAL (default: every 10 minutes).
+ * Scheduled push notification. Runs every 5 minutes; actual check interval read from programConfig.scheduleIntervalMinutes.
  * Only TODAY's open matches where prediction cutoff is in ~15 minutes.
  * Only sends to users who have NOT yet predicted for that match.
  * Requires Firebase Blaze plan for scheduled functions.
  */
 exports.scheduledPredictionReminder = onSchedule({
-  schedule: process.env.SCHEDULE_INTERVAL || 'every 10 minutes',
+  schedule: 'every 5 minutes',
   timeZone: process.env.SCHEDULE_TIMEZONE || 'Asia/Kolkata',
 }, async () => {
     const db = admin.firestore();
     const messaging = admin.messaging();
-
     const now = new Date();
+
+    // Read interval from programConfig; skip if not enough time since last run
+    const progSnap = await db.doc('settings/programConfig').get();
+    const scheduleSnap = await db.doc('settings/notificationSchedule').get();
+    const intervalMin = Math.max(1, Math.min(60, parseInt(progSnap.data()?.scheduleIntervalMinutes, 10) || 10));
+    const lastRun = scheduleSnap.exists ? scheduleSnap.data()?.lastRunAt?.toDate?.() : null;
+    if (lastRun && (now - lastRun) < intervalMin * 60 * 1000) {
+      return null;
+    }
     const reminderWindowMs = 15 * 60 * 1000; // 15 min before cutoff
     const bufferMs = 5 * 60 * 1000; // 5 min window
 
@@ -59,7 +67,13 @@ exports.scheduledPredictionReminder = onSchedule({
       }
     }
 
-    if (matchesToNotify.length === 0) return null;
+    if (matchesToNotify.length === 0) {
+      await db.doc('settings/notificationSchedule').set({
+        lastRunAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+      return null;
+    }
 
     // Users with FCM tokens (non-admin)
     const usersSnap = await db.collection('users').get();
@@ -112,6 +126,11 @@ exports.scheduledPredictionReminder = onSchedule({
         predictionReminderSentAt: admin.firestore.FieldValue.serverTimestamp(),
       });
     }
+
+    await db.doc('settings/notificationSchedule').set({
+      lastRunAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
 
     return null;
   });

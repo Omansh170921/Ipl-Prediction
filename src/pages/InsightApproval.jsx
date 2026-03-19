@@ -316,7 +316,7 @@ export default function InsightApproval() {
           <button type="button" className="hamburger-btn" onClick={() => setMobileMenuOpen(true)} aria-label="Open menu">☰</button>
           <h1>Cricket Insights Approval</h1>
         </header>
-        {message && <div className="alert alert-success">{message}</div>}
+        {message && <div className={`alert alert-toast ${message.startsWith('Error') ? 'alert-error' : 'alert-success'}`}>{message}</div>}
         <section className="admin-section">
           <p className="muted">Approve questions or set correct answer after match completes.</p>
           {insightApprovalLoading ? (

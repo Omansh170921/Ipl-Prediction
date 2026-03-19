@@ -78,8 +78,8 @@ export default function Register() {
       <div className="auth-card">
         <h1>Create Account</h1>
         <p className="auth-hint">We'll send a 6-digit OTP to your email for verification</p>
-        {error && <div className="alert alert-error">{error}</div>}
-        {success && <div className="alert alert-success">{success}</div>}
+        {error && <div className="alert alert-error alert-toast">{error}</div>}
+        {success && <div className="alert alert-success alert-toast">{success}</div>}
         <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label>Email</label>
