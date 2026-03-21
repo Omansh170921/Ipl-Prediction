@@ -264,13 +264,19 @@ body {
 }
 
 .btn-icon-only {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 0.5rem;
   min-width: 2.5rem;
+  min-height: 2.5rem;
 }
 
 .btn-sm.btn-icon-only {
-  padding: 0.35rem 0.4rem;
-  min-width: 2rem;
+  padding: 0.4rem;
+  min-width: 2.25rem;
+  min-height: 2.25rem;
+  font-size: 1rem;
 }
 
 .btn-icon-only .btn-insight-count {
@@ -353,6 +359,12 @@ body {
   background: var(--cricket-light);
   color: var(--success);
   border: 1px solid #a5d6a7;
+}
+
+.alert-info {
+  background: #e3f2fd;
+  color: #1565c0;
+  border: 1px solid #90caf9;
 }
 
 /* Dashboard */
@@ -1652,11 +1664,37 @@ button.stat-card.stat-card-clickable:hover {
 .user-list-item {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.5rem 1rem;
   flex-wrap: wrap;
   list-style: none;
-  padding: 0.5rem 0;
+  padding: 0.6rem 0;
   border-bottom: 1px solid var(--border);
+  min-height: 2.5rem;
+}
+
+.user-list-item .user-list-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.5rem;
+}
+
+.user-list-item .user-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.user-list-item .user-list-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2rem;
+  white-space: nowrap;
 }
 
 .user-list-item .muted {
@@ -1691,10 +1729,6 @@ button.stat-card.stat-card-clickable:hover {
   border-radius: 4px;
   font-size: 0.75rem;
   margin-left: 0.25rem;
-}
-
-.user-list-item .btn {
-  margin-left: auto;
 }
 
 .user-list-item .btn-secondary {
@@ -2052,15 +2086,119 @@ button.stat-card.stat-card-clickable:hover {
 .modal-actions {
   display: flex;
   gap: 0.75rem;
-  margin-top: 1rem;
+  margin-top: 1.25rem;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .modal-actions .btn {
   flex: 1;
+  min-width: 6rem;
 }
 
-.participants-modal .modal-actions .btn {
+.modal-actions .btn:only-of-type,
+.participants-modal .modal-actions .btn,
+.notify-user-modal .modal-actions .btn,
+.match-notify-modal .modal-actions .btn {
   flex: none;
+}
+
+.notify-user-modal,
+.match-notify-modal .modal-content {
+  max-width: 420px;
+}
+
+.match-notify-modal .form-group {
+  margin-bottom: 1rem;
+}
+
+.match-notify-modal .form-group label {
+  display: block;
+  margin-bottom: 0.4rem;
+  font-weight: 500;
+}
+
+.match-notify-modal .notify-user-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card-bg, #fff);
+}
+
+.match-notify-modal .notify-user-list li {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  padding-left: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.match-notify-modal .notify-user-list li:last-child {
+  border-bottom: none;
+}
+
+.match-notify-modal .notify-user-list label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  margin: 0;
+  cursor: pointer;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.match-notify-modal .notify-user-list input[type="checkbox"] {
+  flex-shrink: 0;
+  width: 1.1rem;
+  height: 1.1rem;
+  margin: 0;
+  cursor: pointer;
+}
+
+.match-notify-modal .notify-user-list label span:first-of-type {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.match-notify-modal .notify-user-list label .muted {
+  flex-shrink: 0;
+  width: 1.25rem;
+  text-align: center;
+}
+
+.match-notify-modal .form-group textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 1rem;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.match-notify-modal .form-group textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(46, 125, 50, 0.2);
+}
+
+.match-notify-modal .modal-actions {
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+.match-notify-modal .notify-quick-select {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
 }
 
 .participants-list {
@@ -2347,6 +2485,29 @@ button.stat-card.stat-card-clickable:hover {
   flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
+}
+
+.match-actions .btn-icon-only:not(.btn-insight),
+.match-actions .btn-sm.btn-icon-only:not(.btn-insight) {
+  flex-shrink: 0;
+  min-width: 2.25rem;
+  min-height: 2.25rem;
+  padding: 0.4rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.match-actions .btn-insight.btn-icon-only {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.match-actions .btn-sm:not(.btn-icon-only) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .edit-form {

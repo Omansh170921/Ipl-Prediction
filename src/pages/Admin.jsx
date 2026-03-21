@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useAutoDismiss } from '../hooks/useAutoDismiss';
 import { collection, addDoc, getDocs, getDoc, doc, setDoc, updateDoc, deleteDoc, query, where, increment, runTransaction } from 'firebase/firestore';
-import { db } from '../firebase/config';
+import { db, callFunction } from '../firebase/config';
 import Sidebar from '../components/Sidebar';
 import { toInitCap } from '../utils/format';
 import { calculateMatchPoints } from '../utils/points';
@@ -174,6 +174,8 @@ export default function Admin() {
   const [calculatingMatchId, setCalculatingMatchId] = useState(null);
   const [removingUserId, setRemovingUserId] = useState(null);
   const [approvingUserId, setApprovingUserId] = useState(null);
+  const [cleanupOrphanedLoading, setCleanupOrphanedLoading] = useState(false);
+  const [cleanupOrphanedResult, setCleanupOrphanedResult] = useState(null);
   const [removingRuleId, setRemovingRuleId] = useState(null);
   const [editingRule, setEditingRule] = useState(null);
   const [allUsers, setAllUsers] = useState([]);
@@ -191,6 +193,16 @@ export default function Admin() {
   const [expandedInsightMatchId, setExpandedInsightMatchId] = useState(null);
   const [participantsModal, setParticipantsModal] = useState(null);
   const [participantsLoading, setParticipantsLoading] = useState(false);
+  const [matchNotifyModal, setMatchNotifyModal] = useState(null);
+  const [matchNotifySelectedIds, setMatchNotifySelectedIds] = useState(new Set());
+  const [matchNotifyTitle, setMatchNotifyTitle] = useState('');
+  const [matchNotifyBody, setMatchNotifyBody] = useState('');
+  const [matchNotifySending, setMatchNotifySending] = useState(false);
+  const [matchNotifyLoading, setMatchNotifyLoading] = useState(false);
+  const [notifyUserModal, setNotifyUserModal] = useState(null);
+  const [notifyTitle, setNotifyTitle] = useState('IPL Prediction');
+  const [notifyBody, setNotifyBody] = useState('');
+  const [notifySending, setNotifySending] = useState(false);
 
   const openParticipantsModal = async (match) => {
     if (!match?.id) return;
@@ -220,6 +232,55 @@ export default function Admin() {
       setParticipantsModal(prev => prev && prev.match?.id === match.id ? { ...prev, participants: [], error: 'Failed to load participants' } : prev);
     }
     setParticipantsLoading(false);
+  };
+
+  const openMatchNotifyModal = async (match) => {
+    if (!match?.id) return;
+    setMatchNotifyModal({ match, participants: null });
+    setMatchNotifySelectedIds(new Set());
+    setMatchNotifyTitle(`Match #${match.matchNumber || match.id}: ${getTeamCode(match.team1, teams)} vs ${getTeamCode(match.team2, teams)}`);
+    setMatchNotifyBody(`Reminder: Predict before ${match.thresholdTime || match.time || ''}.`);
+    setMatchNotifyLoading(true);
+    try {
+      const predsSnap = await getDocs(query(collection(db, 'predictions'), where('matchId', '==', match.id)));
+      const predMap = new Map();
+      predsSnap.docs.forEach(d => {
+        const data = d.data();
+        const userId = data.userId ?? data.uid ?? d.id?.split('_')?.[0];
+        predMap.set(userId, data.predictedWinner);
+      });
+      const allUsersList = (allUsers || []).filter(u => !u.isAdmin && u.isAdmin !== 'true');
+      const participants = allUsersList.map(u => {
+        const displayName = u?.username ? toInitCap(String(u.username || '').replace(/_/g, ' ')) : (u?.email || u.id || '—');
+        const predictedWinner = predMap.get(u.id) ?? null;
+        const hasToken = !!(u.fcmToken || '').trim();
+        return { userId: u.id, predictedWinner, displayName, hasToken };
+      }).sort((a, b) => (a.displayName || '').localeCompare(b.displayName || ''));
+      setMatchNotifyModal(prev => prev && prev.match?.id === match.id ? { ...prev, match, participants } : prev);
+    } catch (err) {
+      console.error('Match notify fetch error', err);
+      setMatchNotifyModal(prev => prev && prev.match?.id === match.id ? { ...prev, participants: [], error: 'Failed to load users' } : prev);
+    }
+    setMatchNotifyLoading(false);
+  };
+
+  const handleSendMatchNotification = async (e) => {
+    e.preventDefault();
+    if (!matchNotifyModal?.match || matchNotifySelectedIds.size === 0) return;
+    setMatchNotifySending(true);
+    try {
+      const res = await callFunction('sendNotificationToUsers', {
+        userIds: Array.from(matchNotifySelectedIds),
+        title: matchNotifyTitle.trim() || 'IPL Prediction',
+        body: matchNotifyBody.trim() || 'You have an update.',
+      });
+      const sent = res?.data?.sent ?? 0;
+      setMessage(`Notification sent to ${sent} user(s).`);
+      setMatchNotifyModal(null);
+    } catch (err) {
+      setMessage('Error: ' + (err.message || 'Failed to send notification'));
+    }
+    setMatchNotifySending(false);
   };
 
   const fetchData = async () => {
@@ -806,7 +867,13 @@ export default function Admin() {
       setMessage('Set winner first before calculating points.');
       return;
     }
-    const participatingUsers = (allUsers || []).filter(u => !u.isAdmin && u.isAdmin !== 'true');
+    const matchStartDate = (programConfig?.matchStartDate || '').trim();
+    const participatingUsers = (allUsers || [])
+      .filter(u => !u.isAdmin && u.isAdmin !== 'true')
+      .filter(u => {
+        const cd = (u.createdAt || '').toString().split('T')[0];
+        return !matchStartDate || !cd || cd < matchStartDate || u.predictionApproved === true;
+      });
     if (!participatingUsers.length) {
       setMessage(usersFetchError
         ? `Could not load users: ${usersFetchError}. Check Firestore rules allow reading the users collection.`
@@ -836,7 +903,13 @@ export default function Admin() {
       }
       await updateDoc(doc(db, 'matches', match.id), { pointResults });
       const s = summary || {};
-      setMessage(`Points calculated and saved. Winners: ${s.winners ?? 0}, Wrong: ${s.wrong ?? 0}, Not participated: ${s.notParticipated ?? 0}`);
+      try {
+        const notifRes = await callFunction('notifyPointsCalculated', { matchId: match.id });
+        const sent = notifRes?.data?.sent ?? 0;
+        setMessage(`Points calculated and saved. Winners: ${s.winners ?? 0}, Wrong: ${s.wrong ?? 0}, Not participated: ${s.notParticipated ?? 0}. Notified ${sent} users.`);
+      } catch (notifErr) {
+        setMessage(`Points calculated and saved. Winners: ${s.winners ?? 0}, Wrong: ${s.wrong ?? 0}, Not participated: ${s.notParticipated ?? 0}. (Notification failed: ${notifErr.message})`);
+      }
       fetchData();
     } catch (err) {
       setMessage('Error: ' + err.message);
@@ -922,6 +995,46 @@ export default function Admin() {
       setMessage('Error: ' + err.message);
     }
     setApprovingUserId(null);
+  };
+
+  const openNotifyModal = (u) => {
+    setNotifyUserModal(u);
+    setNotifyTitle('IPL Prediction');
+    setNotifyBody('');
+  };
+
+  const handleSendNotification = async (e) => {
+    e.preventDefault();
+    if (!notifyUserModal?.id) return;
+    setNotifySending(true);
+    try {
+      await callFunction('sendNotificationToUser', {
+        userId: notifyUserModal.id,
+        title: notifyTitle.trim() || 'IPL Prediction',
+        body: notifyBody.trim() || 'You have an update.',
+      });
+      setMessage(`Notification sent to ${toInitCap(notifyUserModal.username || notifyUserModal.email || 'User')}.`);
+      setNotifyUserModal(null);
+    } catch (err) {
+      setMessage('Error: ' + (err.message || 'Failed to send notification'));
+    }
+    setNotifySending(false);
+  };
+
+  const handleCleanupOrphanedAuthUsers = async () => {
+    if (!confirm('Remove orphaned Firebase Auth users? (Auth exists but no Firestore doc – e.g. users who surrendered before the fix). They can re-register after.')) return;
+    setCleanupOrphanedLoading(true);
+    setCleanupOrphanedResult(null);
+    try {
+      const res = await callFunction('cleanupOrphanedAuthUsers', {});
+      const data = res?.data || {};
+      setCleanupOrphanedResult(data);
+      setMessage(data.deleted > 0 ? `Removed ${data.deleted} orphaned Auth user(s).` : 'No orphaned Auth users found.');
+    } catch (err) {
+      setMessage('Error: ' + (err.message || 'Cleanup failed'));
+      setCleanupOrphanedResult({ deleted: 0, users: [], error: err.message });
+    }
+    setCleanupOrphanedLoading(false);
   };
 
   const handleSaveProgramConfig = async (e) => {
@@ -1583,6 +1696,24 @@ export default function Admin() {
           <section id="section-users" className="admin-section">
             <h2>Users <span className="users-count-badge">({allUsers.length} total)</span></h2>
             <p className="muted">Remove users to revoke app access. Users who registered on or after the match start date need approval before they can predict. Admins cannot remove themselves.</p>
+            <div style={{ marginBottom: '1rem' }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleCleanupOrphanedAuthUsers}
+                disabled={cleanupOrphanedLoading}
+                title="Remove Firebase Auth users who have no Firestore user doc (e.g. surrendered before fix). Lets them re-register."
+              >
+                {cleanupOrphanedLoading ? 'Cleaning up...' : 'Cleanup orphaned Auth users'}
+              </button>
+              {cleanupOrphanedResult && (
+                <span className="muted" style={{ marginLeft: '0.5rem' }}>
+                  {cleanupOrphanedResult.deleted > 0
+                    ? `Removed ${cleanupOrphanedResult.deleted}: ${(cleanupOrphanedResult.users || []).map(u => u.email).join(', ')}`
+                    : 'No orphaned users found.'}
+                </span>
+              )}
+            </div>
             {usersFetchError ? (
               <p className="alert alert-error">{usersFetchError}</p>
             ) : allUsers.length === 0 ? (
@@ -1599,33 +1730,71 @@ export default function Admin() {
                     const needsApproval = registeredAfterStart && u.predictionApproved !== true;
                     return (
                     <li key={u.id} className="user-list-item">
-                      <span>{toInitCap(u.username || u.email || 'User')}</span>
-                      <span className="muted"> ({u.email || u.id})</span>
-                      {u.isAdmin && <span className="badge-admin">Admin</span>}
-                      {needsApproval && <span className="badge badge-pending">Awaiting approval</span>}
-                      {registeredAfterStart && u.predictionApproved && <span className="badge badge-approved">Approved</span>}
-                      {needsApproval && (
+                      <div className="user-list-info">
+                        <span>{toInitCap(u.username || u.email || 'User')}</span>
+                        <span className="muted">({u.email || u.id})</span>
+                        {u.isAdmin && <span className="badge-admin">Admin</span>}
+                        {needsApproval && <span className="badge badge-pending">Awaiting approval</span>}
+                        {registeredAfterStart && u.predictionApproved && <span className="badge badge-approved">Approved</span>}
+                      </div>
+                      <div className="user-list-actions">
+                        {needsApproval && (
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            onClick={() => handleApproveUser(u)}
+                            disabled={approvingUserId === u.id}
+                          >
+                            {approvingUserId === u.id ? 'Approving...' : 'Approve'}
+                          </button>
+                        )}
                         <button
                           type="button"
-                          className="btn btn-primary btn-sm"
-                          onClick={() => handleApproveUser(u)}
-                          disabled={approvingUserId === u.id}
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => openNotifyModal(u)}
+                          disabled={!u.fcmToken}
+                          title={u.fcmToken ? 'Send push notification' : 'No token'}
                         >
-                          {approvingUserId === u.id ? 'Approving...' : 'Approve for predictions'}
+                          Notify
                         </button>
-                      )}
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => handleRemoveUser(u)}
-                        disabled={removingUserId === u.id}
-                      >
-                        {removingUserId === u.id ? 'Removing...' : 'Remove'}
-                      </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => handleRemoveUser(u)}
+                          disabled={removingUserId === u.id}
+                        >
+                          {removingUserId === u.id ? 'Removing...' : 'Remove'}
+                        </button>
+                      </div>
                     </li>
                     );
                   })}
               </ul>
+            )}
+            {notifyUserModal && (
+              <div className="modal-overlay" onClick={() => !notifySending && setNotifyUserModal(null)}>
+                <div className="modal-content notify-user-modal" onClick={e => e.stopPropagation()}>
+                  <div className="modal-header">
+                    <h3>Send notification to {toInitCap(notifyUserModal.username || notifyUserModal.email || 'User')}</h3>
+                    <button type="button" className="modal-close" onClick={() => !notifySending && setNotifyUserModal(null)} aria-label="Close">&times;</button>
+                  </div>
+                  <p className="muted" style={{ marginBottom: '1rem' }}>User must have allowed notifications and opened the app.</p>
+                  <form onSubmit={handleSendNotification}>
+                    <div className="form-group">
+                      <label>Title</label>
+                      <input type="text" value={notifyTitle} onChange={e => setNotifyTitle(e.target.value)} placeholder="IPL Prediction" />
+                    </div>
+                    <div className="form-group">
+                      <label>Message</label>
+                      <textarea value={notifyBody} onChange={e => setNotifyBody(e.target.value)} placeholder="Your message here..." rows={3} />
+                    </div>
+                    <div className="modal-actions">
+                      <button type="submit" className="btn btn-primary" disabled={notifySending}>{notifySending ? 'Sending...' : 'Send'}</button>
+                      <button type="button" className="btn btn-secondary" onClick={() => setNotifyUserModal(null)} disabled={notifySending}>Cancel</button>
+                    </div>
+                  </form>
+                </div>
+              </div>
             )}
           </section>
           )}
@@ -1898,6 +2067,15 @@ export default function Admin() {
                         >
                           👥
                         </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline btn-icon-only"
+                          onClick={() => openMatchNotifyModal(m)}
+                          title="Send notification to selected users"
+                          aria-label="Notify"
+                        >
+                          📱
+                        </button>
                         {(m.date || '') <= new Date().toISOString().split('T')[0] && (
                           <button
                             type="button"
@@ -2009,6 +2187,78 @@ export default function Admin() {
                 </>
               )}
             </div>
+            {matchNotifyModal && (
+              <div className="modal-overlay" onClick={() => !matchNotifySending && !matchNotifyLoading && setMatchNotifyModal(null)}>
+                <div className="modal-content participants-modal match-notify-modal" onClick={e => e.stopPropagation()}>
+                  <div className="modal-header">
+                    <h3>
+                      Notify — {getTeamCode(matchNotifyModal.match?.team1, teams)} vs {getTeamCode(matchNotifyModal.match?.team2, teams)}
+                    </h3>
+                    <button type="button" className="modal-close" onClick={() => !matchNotifySending && !matchNotifyLoading && setMatchNotifyModal(null)} aria-label="Close">&times;</button>
+                  </div>
+                  {matchNotifyLoading ? (
+                    <p className="muted">Loading users...</p>
+                  ) : matchNotifyModal.error ? (
+                    <p className="alert alert-error">{matchNotifyModal.error}</p>
+                  ) : !matchNotifyModal.participants || matchNotifyModal.participants.length === 0 ? (
+                    <p className="muted">No users to notify.</p>
+                  ) : (() => {
+                    const withToken = (matchNotifyModal.participants || []).filter(p => p.hasToken);
+                    const withoutToken = (matchNotifyModal.participants || []).filter(p => !p.hasToken);
+                    if (withToken.length === 0) {
+                      return <p className="muted">No users have notification tokens. Ask them to allow notifications and open the app.</p>;
+                    }
+                    return (
+                    <form onSubmit={handleSendMatchNotification}>
+                            <div className="form-group">
+                              <label>Select users</label>
+                              <div className="notify-quick-select">
+                                <button type="button" className="btn btn-sm" onClick={() => setMatchNotifySelectedIds(new Set(withToken.map(p => p.userId)))}>All ({withToken.length})</button>
+                                <button type="button" className="btn btn-sm" onClick={() => setMatchNotifySelectedIds(new Set(withToken.filter(p => p.predictedWinner).map(p => p.userId)))}>Predicted</button>
+                                <button type="button" className="btn btn-sm" onClick={() => setMatchNotifySelectedIds(new Set(withToken.filter(p => !p.predictedWinner).map(p => p.userId)))}>Not predicted</button>
+                              </div>
+                              <ul className="rules-list notify-user-list">
+                                {withToken.map(p => (
+                                  <li key={p.userId}>
+                                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                                      <input
+                                        type="checkbox"
+                                        checked={matchNotifySelectedIds.has(p.userId)}
+                                        onChange={e => {
+                                          const next = new Set(matchNotifySelectedIds);
+                                          if (e.target.checked) next.add(p.userId);
+                                          else next.delete(p.userId);
+                                          setMatchNotifySelectedIds(next);
+                                        }}
+                                      />
+                                      <span>{p.displayName}</span>
+                                      <span className="muted" style={{ fontSize: '0.85em' }}>{p.predictedWinner ? '✓' : '—'}</span>
+                                    </label>
+                                  </li>
+                                ))}
+                              </ul>
+                              {withoutToken.length > 0 && <p className="muted" style={{ fontSize: '0.85em', marginTop: '0.25rem' }}>{withoutToken.length} user(s) without notification token skipped.</p>}
+                            </div>
+                            <div className="form-group">
+                              <label>Title</label>
+                              <input type="text" value={matchNotifyTitle} onChange={e => setMatchNotifyTitle(e.target.value)} placeholder="IPL Prediction" />
+                            </div>
+                            <div className="form-group">
+                              <label>Message</label>
+                              <textarea value={matchNotifyBody} onChange={e => setMatchNotifyBody(e.target.value)} placeholder="Your message..." rows={2} />
+                            </div>
+                            <div className="modal-actions">
+                              <button type="submit" className="btn btn-primary" disabled={matchNotifySending || matchNotifySelectedIds.size === 0}>
+                                {matchNotifySending ? 'Sending...' : `Send to ${matchNotifySelectedIds.size}`}
+                              </button>
+                              <button type="button" className="btn btn-secondary" onClick={() => setMatchNotifyModal(null)} disabled={matchNotifySending}>Cancel</button>
+                            </div>
+                    </form>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
             {participantsModal && (
               <div className="modal-overlay" onClick={() => !participantsLoading && setParticipantsModal(null)}>
                 <div className="modal-content participants-modal" onClick={e => e.stopPropagation()}>

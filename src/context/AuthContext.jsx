@@ -3,6 +3,7 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
+  deleteUser,
   onAuthStateChanged,
   updatePassword,
   reauthenticateWithCredential,
@@ -166,7 +167,7 @@ export function AuthProvider({ children }) {
         // usernameLookup may not exist
       }
     }
-    await signOut(auth);
+    await deleteUser(user);
   };
 
   const getPasswordChangeLimit = async () => {

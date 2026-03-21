@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useAutoDismiss } from '../hooks/useAutoDismiss';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import CricketInsights from '../components/CricketInsights';
 import { useAuth } from '../context/AuthContext';
 import { collection, query, where, getDocs, getDoc, doc, setDoc } from 'firebase/firestore';
@@ -51,6 +51,7 @@ function normalizePlayers(players) {
 
 export default function Dashboard() {
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const { user, userProfile, logout, surrenderAccount, getSurrenderDeadline, changePassword } = useAuth();
   const [matches, setMatches] = useState([]);
   const [allMatches, setAllMatches] = useState([]);
@@ -98,17 +99,28 @@ export default function Dashboard() {
   const [showTodayMatchesModal, setShowTodayMatchesModal] = useState(false);
   const [cricketInsightsConfig, setCricketInsightsConfig] = useState({ enabled: true, maxQuestionsPerUserPerMatch: 1, maxQuestionsPerMatch: 5 });
   const [programConfig, setProgramConfig] = useState({ matchStartDate: '' });
+  const matchStartDate = (programConfig?.matchStartDate || '').trim();
+  const createdAtDate = (userProfile?.createdAt || '').toString().split('T')[0];
+  const needsApproval = Boolean(matchStartDate && createdAtDate && createdAtDate >= matchStartDate && userProfile?.predictionApproved !== true);
   const [insightQuestionCount, setInsightQuestionCount] = useState({});
   const [insightPointsByMatch, setInsightPointsByMatch] = useState({});
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const today = new Date().toISOString().split('T')[0];
 
   useEffect(() => {
-    const section = location.state?.section;
+    const sectionFromState = location.state?.section;
+    const sectionFromUrl = searchParams.get('section');
+    const section = sectionFromState || sectionFromUrl;
     if (section && ['dashboard', 'teams', 'rules', 'matches', 'leaderboard', 'account'].includes(section)) {
       setActiveSection(section);
     }
-  }, [location.state?.section]);
+  }, [location.state?.section, searchParams]);
+
+  useEffect(() => {
+    if (needsApproval && !['leaderboard', 'rules'].includes(activeSection)) {
+      setActiveSection('leaderboard');
+    }
+  }, [needsApproval, activeSection]);
 
   useEffect(() => {
     if (activeSection === 'account' && user) {
@@ -355,6 +367,10 @@ export default function Dashboard() {
     if (!leaderboardRawData) return;
     const { users, allMatches, predsByMatch, rules, programConfig } = leaderboardRawData;
     const matchStartDate = (programConfig?.matchStartDate || '').trim();
+    const approvedUsers = users.filter(u => {
+      const cd = (u.createdAt || '').toString().split('T')[0];
+      return !matchStartDate || !cd || cd < matchStartDate || u.predictionApproved === true;
+    });
     let completedMatches = allMatches.filter(m =>
       (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim()
     );
@@ -362,8 +378,8 @@ export default function Dashboard() {
       completedMatches = completedMatches.filter(m => (m.date || '') <= leaderboardDate);
     }
     completedMatches.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-    const totals = calculateLeaderboard(completedMatches, users, predsByMatch, rules);
-    let sortedByPoints = users.map(u => ({
+    const totals = calculateLeaderboard(completedMatches, approvedUsers, predsByMatch, rules);
+    let sortedByPoints = approvedUsers.map(u => ({
       ...u,
       points: totals[u.id] ?? 0,
     })).sort((a, b) => (b.points ?? 0) - (a.points ?? 0));
@@ -387,7 +403,7 @@ export default function Dashboard() {
       insightMatches = insightMatches.filter(m => (m.date || '') <= leaderboardDate);
     }
     const insightTotals = {};
-    users.forEach(u => { insightTotals[u.id] = 0; });
+    approvedUsers.forEach(u => { insightTotals[u.id] = 0; });
     insightMatches.forEach(m => {
       const ir = m.insightPointResults;
       if (ir && typeof ir === 'object') {
@@ -396,7 +412,7 @@ export default function Dashboard() {
         });
       }
     });
-    const sortedByInsight = [...users]
+    const sortedByInsight = [...approvedUsers]
       .map(u => ({ ...u, insightPoints: insightTotals[u.id] ?? 0 }))
       .sort((a, b) => (b.insightPoints ?? 0) - (a.insightPoints ?? 0));
     rank = 1;
@@ -524,10 +540,14 @@ export default function Dashboard() {
         user={user}
         onLogout={logout}
         activeSection={activeSection}
-        onSectionChange={setActiveSection}
+        onSectionChange={(s) => {
+          if (needsApproval && !['leaderboard', 'rules'].includes(s)) return;
+          setActiveSection(s);
+        }}
         isInsightApprover={(cricketInsightsConfig.insightApproverIds || []).includes(user?.uid)}
         isMobileOpen={mobileMenuOpen}
         onMobileClose={() => setMobileMenuOpen(false)}
+        needsApproval={needsApproval}
       />
 
       <main className="app-main">
@@ -537,6 +557,12 @@ export default function Dashboard() {
           </button>
           <h1>🏏 IPL Prediction Portal</h1>
         </header>
+
+        {needsApproval && (
+          <div className="alert alert-info" style={{ margin: '0 1.5rem 1rem', borderRadius: 8 }}>
+            <strong>Awaiting approval.</strong> You registered on or after the match start date. You can view Leaderboard and Rules only. Once an admin approves you, you&apos;ll be able to access Dashboard, Teams, Matches, and Account.
+          </div>
+        )}
 
         <div className="dashboard-content">
         {activeSection === 'dashboard' && (
