@@ -17,7 +17,7 @@ messaging.onBackgroundMessage((payload) => {
   const { title, body } = payload.notification || {};
   const data = payload.data || {};
   const url = (data.url || '/dashboard').startsWith('/') ? (data.url || '/dashboard') : '/dashboard';
-  const options = { body: body || '', icon: '/vite.svg', data: { url } };
+  const options = { body: body || '', icon: '/favicon.png', data: { url } };
   self.registration.showNotification(title || 'IPL Prediction', options);
 });
 
