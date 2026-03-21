@@ -396,6 +396,9 @@ export default function Dashboard() {
     const ranked = sortedByPoints.map((u, i) => {
       if (i > 0 && (sortedByPoints[i - 1].points ?? 0) > (u.points ?? 0)) rank += 1;
       return { ...u, rank };
+    }).sort((a, b) => {
+      if (a.rank !== b.rank) return a.rank - b.rank;
+      return (a.username || a.email || '').localeCompare(b.username || b.email || '', undefined, { sensitivity: 'base' });
     });
     setLeaderboard(ranked);
     let insightMatches = allMatches;
@@ -419,6 +422,9 @@ export default function Dashboard() {
     const insightRanked = sortedByInsight.map((u, i) => {
       if (i > 0 && (sortedByInsight[i - 1].insightPoints ?? 0) > (u.insightPoints ?? 0)) rank += 1;
       return { ...u, rank };
+    }).sort((a, b) => {
+      if (a.rank !== b.rank) return a.rank - b.rank;
+      return (a.username || a.email || '').localeCompare(b.username || b.email || '', undefined, { sensitivity: 'base' });
     });
     setInsightLeaderboard(insightRanked);
   }, [leaderboardRawData, leaderboardDate]);
