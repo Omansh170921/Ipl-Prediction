@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useAutoDismiss } from '../hooks/useAutoDismiss';
 import { collection, addDoc, getDocs, getDoc, doc, setDoc, updateDoc, deleteDoc, query, where, increment, runTransaction } from 'firebase/firestore';
@@ -199,6 +199,8 @@ export default function Admin() {
   const [matchNotifyBody, setMatchNotifyBody] = useState('');
   const [matchNotifySending, setMatchNotifySending] = useState(false);
   const [matchNotifyLoading, setMatchNotifyLoading] = useState(false);
+  const [matchFilterFrom, setMatchFilterFrom] = useState('');
+  const [matchFilterTo, setMatchFilterTo] = useState('');
   const [notifyUserModal, setNotifyUserModal] = useState(null);
   const [notifyTitle, setNotifyTitle] = useState('IPL Prediction');
   const [notifyBody, setNotifyBody] = useState('');
@@ -930,13 +932,20 @@ export default function Admin() {
     }
   };
 
+  const filteredMatches = useMemo(() => {
+    let list = matches;
+    if (matchFilterFrom) list = list.filter(m => (m.date || '') >= matchFilterFrom);
+    if (matchFilterTo) list = list.filter(m => (m.date || '') <= matchFilterTo);
+    return list;
+  }, [matches, matchFilterFrom, matchFilterTo]);
+
   const toggleMatchSelection = (matchId) => {
     setSelectedMatchIds(prev =>
       prev.includes(matchId) ? prev.filter(id => id !== matchId) : [...prev, matchId]
     );
   };
 
-  const selectAllMatches = () => setSelectedMatchIds(matches.map(m => m.id));
+  const selectAllMatches = () => setSelectedMatchIds(filteredMatches.map(m => m.id));
   const deselectAllMatches = () => setSelectedMatchIds([]);
 
   const handleBulkDeleteMatches = async () => {
@@ -1903,6 +1912,36 @@ export default function Admin() {
                 <p className="muted">No matches yet. Add one above.</p>
               ) : (
                 <>
+                <div className="match-date-filter">
+                  <label htmlFor="match-filter-from">Date filter:</label>
+                  <input
+                    id="match-filter-from"
+                    type="date"
+                    className="date-picker-input"
+                    value={matchFilterFrom}
+                    onChange={(e) => setMatchFilterFrom(e.target.value)}
+                    title="Show matches from this date"
+                  />
+                  <span className="filter-sep">to</span>
+                  <input
+                    id="match-filter-to"
+                    type="date"
+                    className="date-picker-input"
+                    value={matchFilterTo}
+                    onChange={(e) => setMatchFilterTo(e.target.value)}
+                    title="Show matches up to this date"
+                  />
+                  {(matchFilterFrom || matchFilterTo) && (
+                    <button type="button" className="btn btn-sm" onClick={() => { setMatchFilterFrom(''); setMatchFilterTo(''); }}>
+                      Clear
+                    </button>
+                  )}
+                  {(matchFilterFrom || matchFilterTo) && (
+                    <span className="muted" style={{ marginLeft: '0.5rem', fontSize: '0.9em' }}>
+                      ({filteredMatches.length} of {matches.length})
+                    </span>
+                  )}
+                </div>
                 <div className="bulk-actions-row">
                   <button type="button" className="btn btn-sm" onClick={selectAllMatches}>Select All</button>
                   <button type="button" className="btn btn-sm" onClick={deselectAllMatches}>Deselect All</button>
@@ -1916,6 +1955,9 @@ export default function Admin() {
                     {bulkDeleteLoading ? 'Deleting...' : `Delete Selected (${selectedMatchIds.length})`}
                   </button>
                 </div>
+                {filteredMatches.length === 0 ? (
+                  <p className="muted">No matches in selected date range. Clear the filter or adjust dates.</p>
+                ) : (
                 <div className="matches-table">
                   <div className="match-row match-row-header">
                     <span className="match-col-check" aria-hidden="true" />
@@ -2018,7 +2060,7 @@ export default function Admin() {
                       </div>
                     </form>
                   )}
-                  {matches.map((m) => {
+                  {filteredMatches.map((m) => {
                     const matchPending = pendingQuestions.filter(q => q.matchId === m.id);
                     const matchAwaiting = questionsAwaitingAnswer.filter(q => q.matchId === m.id);
                     const hasInsights = matchPending.length > 0 || matchAwaiting.length > 0;
@@ -2184,6 +2226,7 @@ export default function Admin() {
                     );
                   })}
                 </div>
+                )}
                 </>
               )}
             </div>

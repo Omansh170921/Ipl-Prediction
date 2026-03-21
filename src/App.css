@@ -2727,6 +2727,10 @@ button.stat-card.stat-card-clickable:hover {
     box-sizing: border-box;
   }
 
+  .admin-content {
+    overflow-x: hidden;
+  }
+
   .matches-grid {
     max-width: 100%;
   }
@@ -3113,9 +3117,17 @@ button.stat-card.stat-card-clickable:hover {
   }
 
   /* Match form - prevent overflow */
+  .match-form .form-row {
+    flex-wrap: wrap;
+  }
+
   .match-form input,
   .match-form select {
     max-width: 100%;
+  }
+
+  .match-form .form-row select {
+    min-width: 0;
   }
 
   /* Participants modal */
@@ -3171,6 +3183,74 @@ button.stat-card.stat-card-clickable:hover {
     overflow-x: hidden;
   }
 
+  /* Admin matches - prevent overflow and fix alignment */
+  .admin-section .matches-list,
+  .admin-section .matches-table {
+    overflow-x: hidden;
+    max-width: 100%;
+  }
+
+  .admin-section .match-date-filter {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .admin-section .match-date-filter .date-picker-input {
+    max-width: 100%;
+  }
+
+  .admin-section .bulk-actions-row {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  /* Admin match rows - stack on mobile: info row + actions row */
+  .admin-section .match-row {
+    grid-template-columns: 2rem minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    gap: 0.5rem 0.75rem;
+    padding: 0.75rem;
+  }
+
+  .admin-section .match-row.match-row-header {
+    grid-template-rows: auto;
+  }
+
+  .admin-section .match-row.match-row-header .match-col-actions {
+    display: none;
+  }
+
+  .admin-section .match-row .match-select-checkbox {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: start;
+  }
+
+  .admin-section .match-row .match-info {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .admin-section .match-row .match-actions {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: start;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    width: 100%;
+  }
+
+  .admin-section .match-row.match-row-header .match-info {
+    grid-column: 2;
+  }
+
+  .admin-section .match-row .match-insight-approval {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+  }
+
   /* Filter dropdown - full width on mobile */
   .filter-dropdown-group {
     width: 100%;
@@ -3213,5 +3293,19 @@ button.stat-card.stat-card-clickable:hover {
 
   .stat-card, .stat-card-clickable {
     padding: 0.6rem;
+  }
+
+  .admin-section .match-row {
+    padding: 0.6rem;
+    gap: 0.4rem 0.5rem;
+  }
+
+  .admin-section .match-info {
+    font-size: 0.9rem;
+  }
+
+  .admin-section .match-actions .btn {
+    padding: 0.3rem 0.4rem;
+    font-size: 0.75rem;
   }
 }
