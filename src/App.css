@@ -980,13 +980,7 @@ button.stat-card.stat-card-clickable:hover {
 }
 
 .prediction-split-no-pred {
-  background: repeating-linear-gradient(
-    -45deg,
-    #cfd8dc,
-    #cfd8dc 4px,
-    #eceff1 4px,
-    #eceff1 8px
-  );
+  background: linear-gradient(90deg, #c62828, #e53935);
 }
 
 .prediction-split-legend {
@@ -1020,8 +1014,8 @@ button.stat-card.stat-card-clickable:hover {
 }
 
 .legend-dot-none {
-  background: #90a4ae;
-  border: 1px solid #78909c;
+  background: #c62828;
+  border: 1px solid #b71c1c;
 }
 
 .match-number {
