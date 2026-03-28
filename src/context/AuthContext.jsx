@@ -12,6 +12,7 @@ import {
 import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { auth, db, callFunction } from '../firebase/config';
 import { createAndSendOTP } from '../services/otp';
+import { getAppTodayDate } from '../utils/calendarDate';
 
 const AuthContext = createContext({});
 
@@ -146,7 +147,7 @@ export function AuthProvider({ children }) {
     if (!deadline || !deadline.trim()) {
       throw new Error('Account surrender is not available. Contact admin.');
     }
-    const today = new Date().toISOString().split('T')[0];
+    const today = getAppTodayDate();
     if (today > deadline) {
       throw new Error(`Surrender period ended on ${deadline}. You can no longer surrender your account.`);
     }

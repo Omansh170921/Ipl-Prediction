@@ -17,6 +17,7 @@ import {
 import { db } from '../firebase/config';
 import Sidebar from '../components/Sidebar';
 import { toInitCap } from '../utils/format';
+import { getAppTodayDate } from '../utils/calendarDate';
 
 function formatMatchTime(time) {
   if (!time) return 'TBD';
@@ -54,6 +55,8 @@ export default function InsightApproval() {
   const [expandedInsightMatchId, setExpandedInsightMatchId] = useState(null);
   const [requiredApprovals, setRequiredApprovals] = useState(1);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const todayCal = getAppTodayDate();
 
   useAutoDismiss(message, setMessage);
 
@@ -99,7 +102,7 @@ export default function InsightApproval() {
             where('correctAnswer', '==', null)
           )),
         ]);
-        const today = new Date().toISOString().split('T')[0];
+        const today = getAppTodayDate();
         setTeams(teamsSnap.docs.map(d => ({ id: d.id, ...d.data() })));
         const allMatches = matchesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
         const todayMatchesList = allMatches.filter(m => (m.date || '') === today).sort((a, b) => {
@@ -343,10 +346,10 @@ export default function InsightApproval() {
                       <span className="match-teams">{getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)}</span>
                       <span className="match-meta">{m.date} · {formatMatchTime(m.time || m.slot)}</span>
                       {m.winner && <span className="match-winner">Winner: {getTeamCode(m.winner, teams)}</span>}
-                      <span className={`match-status ${(m.status || 'open').toLowerCase() === 'completed' ? 'completed' : m.date === new Date().toISOString().split('T')[0] ? 'today' : 'open'}`}>
+                      <span className={`match-status ${(m.status || 'open').toLowerCase() === 'completed' ? 'completed' : m.date === todayCal ? 'today' : 'open'}`}>
                       {(m.status || 'open').toLowerCase() === 'completed'
                         ? 'completed'
-                        : m.date === new Date().toISOString().split('T')[0]
+                        : m.date === todayCal
                           ? 'today'
                           : 'upcoming'}
                     </span>

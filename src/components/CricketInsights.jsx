@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { collection, addDoc, getDocs, query, where, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { useAuth } from '../context/AuthContext';
+import { getAppTodayDate } from '../utils/calendarDate';
 
 const QUESTION_TYPES = [
   { value: 'yesno', label: 'Yes / No', options: ['Yes', 'No'] },
@@ -221,7 +222,7 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
 
   const isAdmin = userProfile?.isAdmin === true || userProfile?.isAdmin === 'true';
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = getAppTodayDate();
   const isTodayMatch = (matchDate || '') === today;
   const isMatchCompleted = (matchStatus || '').toLowerCase() === 'completed';
   const myQuestionCount = allMatchQuestions.filter(q => q.createdBy === user?.uid).length;

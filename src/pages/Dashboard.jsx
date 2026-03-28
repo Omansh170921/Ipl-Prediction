@@ -1,14 +1,16 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useAutoDismiss } from '../hooks/useAutoDismiss';
-import { useLocation, useSearchParams } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import CricketInsights from '../components/CricketInsights';
 import { useAuth } from '../context/AuthContext';
 import { collection, query, where, getDocs, getDoc, doc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import Sidebar from '../components/Sidebar';
 import { toInitCap } from '../utils/format';
+import { getAppTodayDate } from '../utils/calendarDate';
 import { calculateLeaderboard, to2Decimals } from '../utils/points';
+import { isPredictionEligible } from '../utils/match';
 
 function formatMatchTime(time) {
   if (!time) return 'TBD';
@@ -21,10 +23,67 @@ function formatMatchTime(time) {
   return time;
 }
 
-function isPredictionEligible(match) {
-  const threshold = match.thresholdTime || match.time || '23:59';
-  const cutoff = new Date(match.date + 'T' + (threshold.length === 5 ? threshold : '23:59') + ':00');
-  return new Date() < cutoff;
+function isUserPredictionApproved(userProfile) {
+  return userProfile?.predictionApproved === true || userProfile?.predictionApproved === 'true';
+}
+
+/** Counts predictions per team (and "other") for crowd % after cutoff. */
+/**
+ * @param {number|null|undefined} participatingUserCount - non-admin users (denominator for no-pred %).
+ */
+function getCrowdPredictionStats(match, predsForMatch, participatingUserCount) {
+  const t1 = (match.team1 || '').trim().toLowerCase();
+  const t2 = (match.team2 || '').trim().toLowerCase();
+  const predictedUserIds = new Set();
+  let c1 = 0;
+  let c2 = 0;
+  let other = 0;
+  (predsForMatch || []).forEach((p) => {
+    const w = (p.predictedWinner || '').trim().toLowerCase();
+    if (!w) return;
+    if (p.userId) predictedUserIds.add(p.userId);
+    if (w === t1) c1 += 1;
+    else if (w === t2) c2 += 1;
+    else other += 1;
+  });
+
+  const eligible =
+    typeof participatingUserCount === 'number' && participatingUserCount > 0
+      ? participatingUserCount
+      : null;
+
+  if (eligible) {
+    const noPred = Math.max(0, eligible - predictedUserIds.size);
+    const pct = (n) => Math.round((n / eligible) * 100);
+    return {
+      team1Pct: pct(c1),
+      team2Pct: pct(c2),
+      otherPct: other > 0 ? pct(other) : 0,
+      noPredictionPct: noPred > 0 ? pct(noPred) : 0,
+      c1,
+      c2,
+      other,
+      noPredictionCount: noPred,
+      totalPicks: c1 + c2 + other,
+      eligibleTotal: eligible,
+    };
+  }
+
+  const total = c1 + c2 + other;
+  if (total === 0) return null;
+  const pct = (n) => Math.round((n / total) * 100);
+  return {
+    team1Pct: pct(c1),
+    team2Pct: pct(c2),
+    otherPct: other > 0 ? pct(other) : 0,
+    noPredictionPct: 0,
+    noPredictionCount: 0,
+    c1,
+    c2,
+    other,
+    totalPicks: total,
+    eligibleTotal: null,
+  };
 }
 
 function canUserPredict(userProfile, programConfig) {
@@ -33,7 +92,7 @@ function canUserPredict(userProfile, programConfig) {
   const createdAtDate = (userProfile?.createdAt || '').toString().split('T')[0];
   if (!createdAtDate) return true;
   if (createdAtDate < matchStartDate) return true;
-  return userProfile?.predictionApproved === true;
+  return isUserPredictionApproved(userProfile);
 }
 
 function getTeamCode(teamName, teams) {
@@ -51,7 +110,6 @@ function normalizePlayers(players) {
 
 export default function Dashboard() {
   const location = useLocation();
-  const [searchParams] = useSearchParams();
   const { user, userProfile, logout, surrenderAccount, getSurrenderDeadline, changePassword } = useAuth();
   const [matches, setMatches] = useState([]);
   const [allMatches, setAllMatches] = useState([]);
@@ -67,12 +125,12 @@ export default function Dashboard() {
   const [expandedTeamId, setExpandedTeamId] = useState(null);
   const [activeTab, setActiveTab] = useState('today');
   const [activeSection, setActiveSection] = useState('dashboard');
-  const [matchFilterDate, setMatchFilterDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [matchFilterDate, setMatchFilterDate] = useState(() => getAppTodayDate());
   const [teams, setTeams] = useState([]);
   const [leaderboard, setLeaderboard] = useState([]);
   const [insightLeaderboard, setInsightLeaderboard] = useState([]);
   const [leaderboardTab, setLeaderboardTab] = useState('main');
-  const [leaderboardDate, setLeaderboardDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [leaderboardDate, setLeaderboardDate] = useState(() => getAppTodayDate());
   const [leaderboardRawData, setLeaderboardRawData] = useState(null);
   const [pointRules, setPointRules] = useState({ notParticipatedPoints: 7, wrongPredictionPoints: 5 });
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
@@ -99,28 +157,21 @@ export default function Dashboard() {
   const [showTodayMatchesModal, setShowTodayMatchesModal] = useState(false);
   const [cricketInsightsConfig, setCricketInsightsConfig] = useState({ enabled: true, maxQuestionsPerUserPerMatch: 1, maxQuestionsPerMatch: 5 });
   const [programConfig, setProgramConfig] = useState({ matchStartDate: '' });
-  const matchStartDate = (programConfig?.matchStartDate || '').trim();
-  const createdAtDate = (userProfile?.createdAt || '').toString().split('T')[0];
-  const needsApproval = Boolean(matchStartDate && createdAtDate && createdAtDate >= matchStartDate && userProfile?.predictionApproved !== true);
   const [insightQuestionCount, setInsightQuestionCount] = useState({});
   const [insightPointsByMatch, setInsightPointsByMatch] = useState({});
+  /** matchId -> { userId, predictedWinner }[] for crowd % (all users) */
+  const [crowdPredictionsByMatch, setCrowdPredictionsByMatch] = useState({});
+  /** Non-admin user count; used for “did not predict” % (null = not loaded yet). */
+  const [participatingUserCount, setParticipatingUserCount] = useState(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const today = new Date().toISOString().split('T')[0];
+  const today = getAppTodayDate();
 
   useEffect(() => {
-    const sectionFromState = location.state?.section;
-    const sectionFromUrl = searchParams.get('section');
-    const section = sectionFromState || sectionFromUrl;
+    const section = location.state?.section;
     if (section && ['dashboard', 'teams', 'rules', 'matches', 'leaderboard', 'account'].includes(section)) {
       setActiveSection(section);
     }
-  }, [location.state?.section, searchParams]);
-
-  useEffect(() => {
-    if (needsApproval && !['leaderboard', 'rules'].includes(activeSection)) {
-      setActiveSection('leaderboard');
-    }
-  }, [needsApproval, activeSection]);
+  }, [location.state?.section]);
 
   useEffect(() => {
     if (activeSection === 'account' && user) {
@@ -327,6 +378,44 @@ export default function Dashboard() {
   }, [user, today, matchesRefresh]);
 
   useEffect(() => {
+    if (!user || activeSection !== 'matches') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [allPredSnap, usersSnap] = await Promise.all([
+          getDocs(collection(db, 'predictions')),
+          getDocs(collection(db, 'users')).catch(() => ({ docs: [] })),
+        ]);
+        if (cancelled) return;
+        const nonAdmin = (usersSnap?.docs || []).filter(d => {
+          const u = d.data();
+          return !u.isAdmin && u.isAdmin !== 'true';
+        });
+        setParticipatingUserCount(nonAdmin.length);
+        const byMatchCrowd = {};
+        allPredSnap.docs.forEach(d => {
+          const data = d.data();
+          const mid = data.matchId ?? data.matchID;
+          if (mid == null) return;
+          const key = String(mid);
+          if (!byMatchCrowd[key]) byMatchCrowd[key] = [];
+          byMatchCrowd[key].push({
+            userId: data.userId,
+            predictedWinner: data.predictedWinner,
+          });
+        });
+        setCrowdPredictionsByMatch(byMatchCrowd);
+      } catch {
+        if (!cancelled) {
+          setCrowdPredictionsByMatch({});
+          setParticipatingUserCount(null);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user, activeSection, matchesRefresh]);
+
+  useEffect(() => {
     const fetchLeaderboard = async () => {
       if (activeSection !== 'leaderboard' && activeSection !== 'dashboard') return;
       setLeaderboardLoading(true);
@@ -367,10 +456,6 @@ export default function Dashboard() {
     if (!leaderboardRawData) return;
     const { users, allMatches, predsByMatch, rules, programConfig } = leaderboardRawData;
     const matchStartDate = (programConfig?.matchStartDate || '').trim();
-    const approvedUsers = users.filter(u => {
-      const cd = (u.createdAt || '').toString().split('T')[0];
-      return !matchStartDate || !cd || cd < matchStartDate || u.predictionApproved === true;
-    });
     let completedMatches = allMatches.filter(m =>
       (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim()
     );
@@ -378,17 +463,21 @@ export default function Dashboard() {
       completedMatches = completedMatches.filter(m => (m.date || '') <= leaderboardDate);
     }
     completedMatches.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-    const totals = calculateLeaderboard(completedMatches, approvedUsers, predsByMatch, rules);
-    let sortedByPoints = approvedUsers.map(u => ({
+    const totals = calculateLeaderboard(completedMatches, users, predsByMatch, rules);
+    let sortedByPoints = users.map(u => ({
       ...u,
       points: totals[u.id] ?? 0,
     })).sort((a, b) => (b.points ?? 0) - (a.points ?? 0));
-    // Late users (added on/after match start date): assign bottom last user's points as single total, not match-wise
+    // Late users (joined on/after match start date, not yet approved): assign bottom user's total, not match-wise.
+    // Approved users always use normal match-by-match pointResults.
     if (matchStartDate && sortedByPoints.length > 0) {
       const bottomPoints = sortedByPoints[sortedByPoints.length - 1].points ?? 0;
       sortedByPoints = sortedByPoints.map(u => {
         const createdAtDate = (u.createdAt || '').toString().split('T')[0];
-        const isLateUser = createdAtDate && createdAtDate >= matchStartDate;
+        const isLateUser =
+          createdAtDate &&
+          createdAtDate >= matchStartDate &&
+          !isUserPredictionApproved(u);
         return isLateUser ? { ...u, points: bottomPoints, isLateUser: true } : { ...u, isLateUser: false };
       }).sort((a, b) => (b.points ?? 0) - (a.points ?? 0));
     }
@@ -396,9 +485,6 @@ export default function Dashboard() {
     const ranked = sortedByPoints.map((u, i) => {
       if (i > 0 && (sortedByPoints[i - 1].points ?? 0) > (u.points ?? 0)) rank += 1;
       return { ...u, rank };
-    }).sort((a, b) => {
-      if (a.rank !== b.rank) return a.rank - b.rank;
-      return (a.username || a.email || '').localeCompare(b.username || b.email || '', undefined, { sensitivity: 'base' });
     });
     setLeaderboard(ranked);
     let insightMatches = allMatches;
@@ -406,7 +492,7 @@ export default function Dashboard() {
       insightMatches = insightMatches.filter(m => (m.date || '') <= leaderboardDate);
     }
     const insightTotals = {};
-    approvedUsers.forEach(u => { insightTotals[u.id] = 0; });
+    users.forEach(u => { insightTotals[u.id] = 0; });
     insightMatches.forEach(m => {
       const ir = m.insightPointResults;
       if (ir && typeof ir === 'object') {
@@ -415,16 +501,13 @@ export default function Dashboard() {
         });
       }
     });
-    const sortedByInsight = [...approvedUsers]
+    const sortedByInsight = [...users]
       .map(u => ({ ...u, insightPoints: insightTotals[u.id] ?? 0 }))
       .sort((a, b) => (b.insightPoints ?? 0) - (a.insightPoints ?? 0));
     rank = 1;
     const insightRanked = sortedByInsight.map((u, i) => {
       if (i > 0 && (sortedByInsight[i - 1].insightPoints ?? 0) > (u.insightPoints ?? 0)) rank += 1;
       return { ...u, rank };
-    }).sort((a, b) => {
-      if (a.rank !== b.rank) return a.rank - b.rank;
-      return (a.username || a.email || '').localeCompare(b.username || b.email || '', undefined, { sensitivity: 'base' });
     });
     setInsightLeaderboard(insightRanked);
   }, [leaderboardRawData, leaderboardDate]);
@@ -496,10 +579,64 @@ export default function Dashboard() {
       setPredictions(prev => ({ ...prev, [key]: predictedWinner }));
       setSavedPredictions(prev => ({ ...prev, [key]: predictedWinner }));
       setSavedMatchIds(prev => new Set([...prev, key]));
+      setCrowdPredictionsByMatch(prev => {
+        const list = [...(prev[key] || [])];
+        const idx = list.findIndex(p => p.userId === user.uid);
+        const row = { userId: user.uid, predictedWinner };
+        if (idx >= 0) list[idx] = row;
+        else list.push(row);
+        return { ...prev, [key]: list };
+      });
     } catch (err) {
       alert(err.message);
     }
     setSaving(null);
+  };
+
+  const renderCrowdMatchStats = (match) => {
+    if (isPredictionEligible(match)) return null;
+    const stats = getCrowdPredictionStats(match, crowdPredictionsByMatch[String(match.id)], participatingUserCount);
+    if (!stats) {
+      return (
+        <div className="match-crowd-predictions">
+          <p className="match-crowd-predictions-title">Crowd prediction</p>
+          <p className="muted crowd-no-preds">No predictions yet.</p>
+        </div>
+      );
+    }
+    const code1 = getTeamCode(match.team1, teams);
+    const code2 = getTeamCode(match.team2, teams);
+    const noPred = stats.noPredictionCount ?? 0;
+    const aria = [
+      `${code1} ${stats.team1Pct}% (${stats.c1})`,
+      `${code2} ${stats.team2Pct}% (${stats.c2})`,
+      stats.other > 0 ? `other ${stats.otherPct}% (${stats.other})` : null,
+      noPred > 0 ? `no prediction ${stats.noPredictionPct}% (${noPred})` : null,
+    ].filter(Boolean).join(', ');
+    return (
+      <div className="match-crowd-predictions">
+        <p className="match-crowd-predictions-title">Crowd prediction</p>
+        {stats.eligibleTotal != null && (
+          <p className="muted crowd-pct-note">Percentages are of {stats.eligibleTotal} participating users (non-admin).</p>
+        )}
+        <div className="prediction-split-bar" role="img" aria-label={aria}>
+          {stats.c1 > 0 && <span className="prediction-split-seg prediction-split-team1" style={{ flex: stats.c1 }} />}
+          {stats.c2 > 0 && <span className="prediction-split-seg prediction-split-team2" style={{ flex: stats.c2 }} />}
+          {stats.other > 0 && <span className="prediction-split-seg prediction-split-other" style={{ flex: stats.other }} />}
+          {noPred > 0 && <span className="prediction-split-seg prediction-split-no-pred" style={{ flex: noPred }} />}
+        </div>
+        <div className="prediction-split-legend">
+          <span><span className="legend-dot legend-dot-t1" aria-hidden /> {code1} <strong>{stats.team1Pct}%</strong> <span className="muted">({stats.c1})</span></span>
+          <span><span className="legend-dot legend-dot-t2" aria-hidden /> {code2} <strong>{stats.team2Pct}%</strong> <span className="muted">({stats.c2})</span></span>
+          {stats.other > 0 && <span className="muted">Other {stats.otherPct}% ({stats.other})</span>}
+          {noPred > 0 && (
+            <span className="muted">
+              <span className="legend-dot legend-dot-none" aria-hidden /> No prediction <strong>{stats.noPredictionPct}%</strong> ({noPred})
+            </span>
+          )}
+        </div>
+      </div>
+    );
   };
 
   const openParticipantsModal = async (match) => {
@@ -546,14 +683,10 @@ export default function Dashboard() {
         user={user}
         onLogout={logout}
         activeSection={activeSection}
-        onSectionChange={(s) => {
-          if (needsApproval && !['leaderboard', 'rules'].includes(s)) return;
-          setActiveSection(s);
-        }}
+        onSectionChange={setActiveSection}
         isInsightApprover={(cricketInsightsConfig.insightApproverIds || []).includes(user?.uid)}
         isMobileOpen={mobileMenuOpen}
         onMobileClose={() => setMobileMenuOpen(false)}
-        needsApproval={needsApproval}
       />
 
       <main className="app-main">
@@ -563,12 +696,6 @@ export default function Dashboard() {
           </button>
           <h1>🏏 IPL Prediction Portal</h1>
         </header>
-
-        {needsApproval && (
-          <div className="alert alert-info" style={{ margin: '0 1.5rem 1rem', borderRadius: 8 }}>
-            <strong>Awaiting approval.</strong> You registered on or after the match start date. You can view Leaderboard and Rules only. Once an admin approves you, you&apos;ll be able to access Dashboard, Teams, Matches, and Account.
-          </div>
-        )}
 
         <div className="dashboard-content">
         {activeSection === 'dashboard' && (
@@ -1058,10 +1185,15 @@ export default function Dashboard() {
                   </div>
                   <div className="match-prediction">
                         {!canUserPredict(userProfile, programConfig) ? (
-                      <p className="prediction-closed">Awaiting admin approval. You registered after the match start date. Contact admin to get approval for predictions.</p>
+                      <>
+                        <p className="prediction-closed">Awaiting admin approval. You registered after the match start date. Contact admin to get approval for predictions.</p>
+                        {!isPredictionEligible(match) && renderCrowdMatchStats(match)}
+                      </>
                     ) : !isPredictionEligible(match) ? (
                       <>
-                        <p className="prediction-closed">Prediction closed. Cutoff was {formatMatchTime(match.thresholdTime || match.time)} on {match.date}.</p>
+                        {(match.status || '').toLowerCase() !== 'completed' && (
+                          <p className="prediction-closed">Prediction closed. Cutoff was {formatMatchTime(match.thresholdTime || match.time)} on {match.date}.</p>
+                        )}
                         {match.winner && <p className="match-winner-badge">🏆 Winner: {getTeamCode(match.winner, teams)}</p>}
                         <div className="match-points-row">
                           {match.pointResults && match.pointResults[user?.uid] != null && (
@@ -1071,6 +1203,7 @@ export default function Dashboard() {
                             <p className="match-points-badge match-insight-points">Insight points: <strong className="points-positive">+{insightPointsByMatch[match.id]}</strong></p>
                           )}
                         </div>
+                        {renderCrowdMatchStats(match)}
                       </>
                     ) : (
                       <>
@@ -1243,6 +1376,7 @@ export default function Dashboard() {
                           <p className="match-points-badge match-insight-points">Insight points: <strong className="points-positive">+{insightPointsByMatch[match.id]}</strong></p>
                         )}
                       </div>
+                      {!isPredictionEligible(match) && renderCrowdMatchStats(match)}
                       {cricketInsightsConfig.enabled && expandedInsightMatchId === match.id && (
                         <div className="match-insights">
                           <CricketInsights matchId={match.id} matchDate={match.date} matchStatus={match.status} config={cricketInsightsConfig} />
@@ -1371,11 +1505,17 @@ export default function Dashboard() {
               <>
                 {(() => {
                   const m = participantsModal.match;
+                  const predictionsHidden = isPredictionEligible(m);
                   const isCompleted = (m?.status || '').toLowerCase() === 'completed' && (m?.winner || '').trim();
                   const pointResults = m?.pointResults && typeof m.pointResults === 'object' ? m.pointResults : null;
                   const showPoints = isCompleted && pointResults;
                   return (
                     <>
+                      {predictionsHidden && (
+                        <p className="muted participants-points-note">
+                          Team picks stay hidden until the prediction cutoff ({formatMatchTime(m?.thresholdTime || m?.time)} on {m?.date}).
+                        </p>
+                      )}
                       {showPoints && (
                         <p className="muted participants-points-note">Points shown for completed match with winner declared.</p>
                       )}
@@ -1391,7 +1531,11 @@ export default function Dashboard() {
                     return (
                       <li key={p.userId || i} className={`participant-item ${!showPoints ? 'participant-item-no-points' : ''}`}>
                         <span className="participant-name">{p.displayName}</span>
-                        <span className="participant-prediction">{p.predictedWinner ? (getTeamCode(p.predictedWinner, teams) || p.predictedWinner) : '—'}</span>
+                        <span className="participant-prediction">
+                          {predictionsHidden
+                            ? '—'
+                            : (p.predictedWinner ? (getTeamCode(p.predictedWinner, teams) || p.predictedWinner) : '—')}
+                        </span>
                         {showPoints && (
                           <span className={`participant-points ${ptsNum != null && ptsNum >= 0 ? 'points-positive' : 'points-negative'}`}>
                             {ptsNum != null ? (ptsNum >= 0 ? '+' : '') + ptsNum : '—'}
@@ -1471,7 +1615,11 @@ export default function Dashboard() {
               const progConfig = leaderboardRawData?.programConfig || {};
               const matchStartDate = (progConfig.matchStartDate || '').trim();
               const createdAtDate = (userPointHistoryModal.createdAt || '').toString().split('T')[0];
-              const isLateUser = matchStartDate && createdAtDate && createdAtDate >= matchStartDate;
+              const isLateUser =
+                matchStartDate &&
+                createdAtDate &&
+                createdAtDate >= matchStartDate &&
+                !isUserPredictionApproved(userPointHistoryModal);
               if (isLateUser) {
                 const totalPts = userPointHistoryModal.points ?? 0;
                 return (

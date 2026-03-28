@@ -1,7 +1,7 @@
 import { Link, NavLink } from 'react-router-dom';
 import { toInitCap } from '../utils/format';
 
-export default function Sidebar({ admin = false, userProfile, user, onLogout, activeSection = 'matches', onSectionChange, isInsightApprover = false, isMobileOpen = false, onMobileClose, needsApproval = false }) {
+export default function Sidebar({ admin = false, userProfile, user, onLogout, activeSection = 'matches', onSectionChange, isInsightApprover = false, isMobileOpen = false, onMobileClose }) {
   return (
     <>
       {onMobileClose && (
@@ -68,17 +68,6 @@ export default function Sidebar({ admin = false, userProfile, user, onLogout, ac
             <button type="button" className={`sidebar-link ${activeSection === 'users' ? 'active' : ''}`} onClick={() => { onSectionChange?.('users'); onMobileClose?.(); }}>
               <span className="sidebar-icon">👤</span>
               Users
-            </button>
-          </>
-        ) : needsApproval ? (
-          <>
-            <button type="button" className={`sidebar-link ${activeSection === 'leaderboard' ? 'active' : ''}`} onClick={() => { onSectionChange?.('leaderboard'); onMobileClose?.(); }}>
-              <span className="sidebar-icon">🏆</span>
-              Leaderboard
-            </button>
-            <button type="button" className={`sidebar-link ${activeSection === 'rules' ? 'active' : ''}`} onClick={() => { onSectionChange?.('rules'); onMobileClose?.(); }}>
-              <span className="sidebar-icon">📋</span>
-              Rules
             </button>
           </>
         ) : (
