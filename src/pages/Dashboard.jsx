@@ -10,7 +10,7 @@ import Sidebar from '../components/Sidebar';
 import { toInitCap } from '../utils/format';
 import { getAppTodayDate } from '../utils/calendarDate';
 import { calculateLeaderboard, to2Decimals } from '../utils/points';
-import { isPredictionEligible } from '../utils/match';
+import { isPredictionEligible, shouldShowCrowdPrediction } from '../utils/match';
 
 function formatMatchTime(time) {
   if (!time) return 'TBD';
@@ -164,7 +164,7 @@ export default function Dashboard() {
   const [showParticipatedModal, setShowParticipatedModal] = useState(false);
   const [showTodayMatchesModal, setShowTodayMatchesModal] = useState(false);
   const [cricketInsightsConfig, setCricketInsightsConfig] = useState({ enabled: true, maxQuestionsPerUserPerMatch: 1, maxQuestionsPerMatch: 5 });
-  const [programConfig, setProgramConfig] = useState({ matchStartDate: '' });
+  const [programConfig, setProgramConfig] = useState({ matchStartDate: '', crowdPredictionVisibility: 'always' });
   const [insightQuestionCount, setInsightQuestionCount] = useState({});
   const [insightPointsByMatch, setInsightPointsByMatch] = useState({});
   /** matchId -> { userId, predictedWinner }[] for crowd % (all users) */
@@ -372,7 +372,10 @@ export default function Dashboard() {
         const progSnap = await getDoc(doc(db, 'settings', 'programConfig'));
         if (progSnap.exists()) {
           const d = progSnap.data();
-          setProgramConfig({ matchStartDate: d.matchStartDate || '' });
+          setProgramConfig({
+            matchStartDate: d.matchStartDate || '',
+            crowdPredictionVisibility: d.crowdPredictionVisibility === 'afterCutoff' ? 'afterCutoff' : 'always',
+          });
         }
       } catch {
         // use defaults
@@ -1197,7 +1200,7 @@ export default function Dashboard() {
                         {!canUserPredict(userProfile, programConfig) ? (
                       <>
                         <p className="prediction-closed">Awaiting admin approval. You registered after the match start date. Contact admin to get approval for predictions.</p>
-                        {renderCrowdMatchStats(match)}
+                        {shouldShowCrowdPrediction(programConfig, match, isPredictionEligible(match)) && renderCrowdMatchStats(match)}
                       </>
                     ) : !isPredictionEligible(match) ? (
                       <>
@@ -1213,7 +1216,7 @@ export default function Dashboard() {
                             <p className="match-points-badge match-insight-points">Insight points: <strong className="points-positive">+{insightPointsByMatch[match.id]}</strong></p>
                           )}
                         </div>
-                        {renderCrowdMatchStats(match)}
+                        {shouldShowCrowdPrediction(programConfig, match, isPredictionEligible(match)) && renderCrowdMatchStats(match)}
                       </>
                     ) : (
                       <>
@@ -1239,7 +1242,7 @@ export default function Dashboard() {
                         {saving === match.id ? 'Saving...' : 'Save'}
                       </button>
                     </div>
-                    {renderCrowdMatchStats(match)}
+                    {shouldShowCrowdPrediction(programConfig, match, isPredictionEligible(match)) && renderCrowdMatchStats(match)}
                     </>
                     )}
                   </div>
@@ -1390,7 +1393,7 @@ export default function Dashboard() {
                           <p className="match-points-badge match-insight-points">Insight points: <strong className="points-positive">+{insightPointsByMatch[match.id]}</strong></p>
                         )}
                       </div>
-                      {renderCrowdMatchStats(match)}
+                      {shouldShowCrowdPrediction(programConfig, match, isPredictionEligible(match)) && renderCrowdMatchStats(match)}
                       {cricketInsightsConfig.enabled && expandedInsightMatchId === match.id && (
                         <div className="match-insights">
                           <CricketInsights matchId={match.id} matchDate={match.date} matchStatus={match.status} config={cricketInsightsConfig} />

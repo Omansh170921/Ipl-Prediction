@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useAutoDismiss } from '../hooks/useAutoDismiss';
-import { collection, addDoc, getDocs, getDoc, doc, setDoc, updateDoc, deleteDoc, query, where, increment, runTransaction, writeBatch } from 'firebase/firestore';
+import { collection, addDoc, getDocs, getDoc, doc, setDoc, updateDoc, deleteDoc, deleteField, query, where, increment, runTransaction, writeBatch } from 'firebase/firestore';
 import { db, callFunction } from '../firebase/config';
 import Sidebar from '../components/Sidebar';
 import { toInitCap } from '../utils/format';
@@ -121,6 +121,10 @@ function parseImportedMatches(jsonString) {
     };
     if (stadium) row.stadium = stadium;
     if (city) row.city = city;
+    const cv = (m?.crowdPredictionVisibility ?? '').toString().trim().toLowerCase();
+    if (cv === 'always' || cv === 'aftercutoff') {
+      row.crowdPredictionVisibility = cv === 'aftercutoff' ? 'afterCutoff' : 'always';
+    }
     matches.push(row);
   }
   if (matches.length === 0) return { error: 'No valid matches found. Each match needs team1, team2, date.' };
@@ -151,6 +155,7 @@ export default function Admin() {
     thresholdTime: '18:00',
     stadium: '',
     city: '',
+    crowdPredictionVisibility: 'inherit',
   });
   const [editingMatch, setEditingMatch] = useState(null);
   const [editingTeam, setEditingTeam] = useState(null);
@@ -171,7 +176,12 @@ export default function Admin() {
   const [activeSection, setActiveSection] = useState('matches');
   const [pointRules, setPointRules] = useState({ notParticipatedPoints: 7, wrongPredictionPoints: 5 });
   const [passwordPolicy, setPasswordPolicy] = useState({ maxPasswordChanges: 2, surrenderDeadline: '' });
-  const [programConfig, setProgramConfig] = useState({ matchStartDate: '', scheduleIntervalMinutes: 10, loserPercent: 25 });
+  const [programConfig, setProgramConfig] = useState({
+    matchStartDate: '',
+    scheduleIntervalMinutes: 10,
+    loserPercent: 25,
+    crowdPredictionVisibility: 'always',
+  });
   const [cricketInsightsConfig, setCricketInsightsConfig] = useState({
     enabled: true,
     maxQuestionsPerUserPerMatch: 1,
@@ -297,6 +307,7 @@ export default function Admin() {
             matchStartDate: d.matchStartDate || '',
             scheduleIntervalMinutes: d.scheduleIntervalMinutes ?? 10,
             loserPercent: d.loserPercent ?? 25,
+            crowdPredictionVisibility: d.crowdPredictionVisibility === 'afterCutoff' ? 'afterCutoff' : 'always',
           });
         }
       } catch {
@@ -750,6 +761,7 @@ export default function Admin() {
     const matchNumber = String(matchForm.matchNumber).trim();
     const stadium = (matchForm.stadium || '').trim();
     const city = (matchForm.city || '').trim();
+    const crowd = matchForm.crowdPredictionVisibility;
     try {
       await addDoc(collection(db, 'matches'), {
         matchNumber,
@@ -761,6 +773,7 @@ export default function Admin() {
         status: 'open',
         ...(stadium ? { stadium } : {}),
         ...(city ? { city } : {}),
+        ...(crowd === 'always' || crowd === 'afterCutoff' ? { crowdPredictionVisibility: crowd } : {}),
         createdBy: user.uid,
         createdAt: new Date().toISOString(),
       });
@@ -773,6 +786,7 @@ export default function Admin() {
         thresholdTime: '18:00',
         stadium: '',
         city: '',
+        crowdPredictionVisibility: 'inherit',
       }));
       setMessage('Match added successfully');
       fetchData();
@@ -788,6 +802,9 @@ export default function Admin() {
       time = slotMap[match.slot] || '19:00';
     }
     const thresholdTime = match.thresholdTime || '18:00';
+    const cv = (match.crowdPredictionVisibility || '').toString().trim().toLowerCase();
+    const crowdPredictionVisibility =
+      cv === 'always' ? 'always' : cv === 'aftercutoff' ? 'afterCutoff' : 'inherit';
     setEditingMatch({
       id: match.id,
       matchNumber: match.matchNumber || '',
@@ -800,6 +817,7 @@ export default function Admin() {
       winner: match.winner || '',
       stadium: match.stadium || '',
       city: match.city || '',
+      crowdPredictionVisibility,
     });
   };
 
@@ -822,6 +840,11 @@ export default function Admin() {
     try {
       const est = (editingMatch.stadium || '').trim();
       const ecity = (editingMatch.city || '').trim();
+      const crowd = editingMatch.crowdPredictionVisibility;
+      const crowdPatch =
+        crowd === 'inherit'
+          ? { crowdPredictionVisibility: deleteField() }
+          : { crowdPredictionVisibility: crowd === 'afterCutoff' ? 'afterCutoff' : 'always' };
       await updateDoc(doc(db, 'matches', editingMatch.id), {
         matchNumber: (editingMatch.matchNumber || '').toString().trim(),
         team1: editingMatch.team1,
@@ -833,6 +856,7 @@ export default function Admin() {
         winner: editingMatch.winner || null,
         stadium: est || null,
         city: ecity || null,
+        ...crowdPatch,
       });
       setEditingMatch(null);
       setMessage('Match updated successfully');
@@ -987,6 +1011,8 @@ export default function Admin() {
       const matchStartDate = (programConfig.matchStartDate || '').trim();
       const scheduleInterval = Math.max(1, Math.min(60, parseInt(programConfig.scheduleIntervalMinutes, 10) || 10));
       const loserPercent = Math.max(0, Math.min(50, parseInt(programConfig.loserPercent, 10) || 25));
+      const crowdPredictionVisibility =
+        programConfig.crowdPredictionVisibility === 'afterCutoff' ? 'afterCutoff' : 'always';
       await Promise.all([
         setDoc(doc(db, 'rules', 'pointRules'), {
           notParticipatedPoints: notParticipated,
@@ -997,6 +1023,7 @@ export default function Admin() {
           matchStartDate: matchStartDate || null,
           scheduleIntervalMinutes: scheduleInterval,
           loserPercent: loserPercent,
+          crowdPredictionVisibility,
           updatedAt: new Date().toISOString(),
         }),
         setDoc(doc(db, 'settings', 'passwordPolicy'), {
@@ -1029,7 +1056,13 @@ export default function Admin() {
         }
       }
       setPointRules(prev => ({ ...prev, notParticipatedPoints: notParticipated, wrongPredictionPoints: wrongPrediction }));
-      setProgramConfig(prev => ({ ...prev, matchStartDate, scheduleIntervalMinutes: scheduleInterval, loserPercent }));
+      setProgramConfig(prev => ({
+        ...prev,
+        matchStartDate,
+        scheduleIntervalMinutes: scheduleInterval,
+        loserPercent,
+        crowdPredictionVisibility,
+      }));
       setPasswordPolicy(prev => ({ ...prev, maxPasswordChanges: max, surrenderDeadline: deadline }));
       setCricketInsightsConfig(prev => ({ ...prev, enabled: cricketInsightsConfig.enabled, maxQuestionsPerUserPerMatch: maxPerUser, maxQuestionsPerMatch: maxPerMatch }));
       setMessage('Program config saved successfully');
@@ -1475,6 +1508,18 @@ export default function Admin() {
                     />
                   </div>
                   <p className="muted config-note">Bottom X% of leaderboard = loser 📉; top (100−X)% = winner 🏆. Default 25.</p>
+                  <div className="config-item">
+                    <label htmlFor="crowd-pred-visibility">Crowd prediction % (default):</label>
+                    <select
+                      id="crowd-pred-visibility"
+                      value={programConfig.crowdPredictionVisibility === 'afterCutoff' ? 'afterCutoff' : 'always'}
+                      onChange={(e) => setProgramConfig(prev => ({ ...prev, crowdPredictionVisibility: e.target.value }))}
+                    >
+                      <option value="always">Show before and after prediction cutoff</option>
+                      <option value="afterCutoff">Show only after prediction cutoff</option>
+                    </select>
+                  </div>
+                  <p className="muted config-note">Controls when team crowd percentages appear on the dashboard. Per-match overrides can be set when adding or editing a match.</p>
                 </div>
                 <div className="config-card">
                   <h3>Point Rules</h3>
@@ -1687,7 +1732,7 @@ export default function Admin() {
             <div className="import-players-section">
               <h5>Paste JSON array</h5>
               <p className="import-hint">
-                Paste a JSON <strong>array</strong> of matches (or <code>{'{'}"matches": [ ... ]{'}'}</code>). Each row needs <strong>team1</strong>, <strong>team2</strong>, <strong>date</strong> (YYYY-MM-DD). Optional: <strong>matchId</strong>/<strong>matchNumber</strong>, <strong>time</strong>, <strong>thresholdTime</strong>, <strong>status</strong>, <strong>stadium</strong>, <strong>city</strong>.
+                Paste a JSON <strong>array</strong> of matches (or <code>{'{'}"matches": [ ... ]{'}'}</code>). Each row needs <strong>team1</strong>, <strong>team2</strong>, <strong>date</strong> (YYYY-MM-DD). Optional: <strong>matchId</strong>/<strong>matchNumber</strong>, <strong>time</strong>, <strong>thresholdTime</strong>, <strong>status</strong>, <strong>stadium</strong>, <strong>city</strong>, <strong>crowdPredictionVisibility</strong> (<code>always</code> or <code>afterCutoff</code>).
                 Bulk import uses batched writes (up to 450 per batch).
               </p>
               <textarea
@@ -1796,6 +1841,20 @@ export default function Admin() {
                   />
                 </div>
               </div>
+              <div className="form-row">
+                <div className="form-group-inline" style={{ flex: 1, minWidth: '220px' }}>
+                  <label htmlFor="match-crowd-visibility">Crowd % visibility</label>
+                  <select
+                    id="match-crowd-visibility"
+                    value={matchForm.crowdPredictionVisibility || 'inherit'}
+                    onChange={(e) => setMatchForm(prev => ({ ...prev, crowdPredictionVisibility: e.target.value }))}
+                  >
+                    <option value="inherit">Use program default</option>
+                    <option value="always">Before &amp; after cutoff</option>
+                    <option value="afterCutoff">After cutoff only</option>
+                  </select>
+                </div>
+              </div>
               <button
                 type="submit"
                 className="btn btn-primary"
@@ -1895,6 +1954,20 @@ export default function Admin() {
                             placeholder="e.g. Mumbai"
                             autoComplete="off"
                           />
+                        </div>
+                      </div>
+                      <div className="form-row">
+                        <div className="form-group-inline" style={{ flex: 1, minWidth: '220px' }}>
+                          <label htmlFor="edit-match-crowd-visibility">Crowd % visibility</label>
+                          <select
+                            id="edit-match-crowd-visibility"
+                            value={editingMatch.crowdPredictionVisibility || 'inherit'}
+                            onChange={(e) => setEditingMatch(prev => ({ ...prev, crowdPredictionVisibility: e.target.value }))}
+                          >
+                            <option value="inherit">Use program default</option>
+                            <option value="always">Before &amp; after cutoff</option>
+                            <option value="afterCutoff">After cutoff only</option>
+                          </select>
                         </div>
                       </div>
                       <div className="form-row">
