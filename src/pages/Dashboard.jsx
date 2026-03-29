@@ -27,7 +27,7 @@ function isUserPredictionApproved(userProfile) {
   return userProfile?.predictionApproved === true || userProfile?.predictionApproved === 'true';
 }
 
-/** Counts predictions per team (and "other") for crowd % after cutoff. */
+/** Counts predictions per team (and "other") for crowd % (shown whenever data exists). */
 /**
  * @param {number|null|undefined} participatingUserCount - non-admin users (denominator for no-pred %).
  */
@@ -602,7 +602,6 @@ export default function Dashboard() {
   };
 
   const renderCrowdMatchStats = (match) => {
-    if (isPredictionEligible(match)) return null;
     const stats = getCrowdPredictionStats(match, crowdPredictionsByMatch[String(match.id)], participatingUserCount);
     if (!stats) {
       return (
@@ -1198,7 +1197,7 @@ export default function Dashboard() {
                         {!canUserPredict(userProfile, programConfig) ? (
                       <>
                         <p className="prediction-closed">Awaiting admin approval. You registered after the match start date. Contact admin to get approval for predictions.</p>
-                        {!isPredictionEligible(match) && renderCrowdMatchStats(match)}
+                        {renderCrowdMatchStats(match)}
                       </>
                     ) : !isPredictionEligible(match) ? (
                       <>
@@ -1240,6 +1239,7 @@ export default function Dashboard() {
                         {saving === match.id ? 'Saving...' : 'Save'}
                       </button>
                     </div>
+                    {renderCrowdMatchStats(match)}
                     </>
                     )}
                   </div>
@@ -1390,7 +1390,7 @@ export default function Dashboard() {
                           <p className="match-points-badge match-insight-points">Insight points: <strong className="points-positive">+{insightPointsByMatch[match.id]}</strong></p>
                         )}
                       </div>
-                      {!isPredictionEligible(match) && renderCrowdMatchStats(match)}
+                      {renderCrowdMatchStats(match)}
                       {cricketInsightsConfig.enabled && expandedInsightMatchId === match.id && (
                         <div className="match-insights">
                           <CricketInsights matchId={match.id} matchDate={match.date} matchStatus={match.status} config={cricketInsightsConfig} />
