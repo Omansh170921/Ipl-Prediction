@@ -13,7 +13,7 @@ import Dashboard from './pages/Dashboard';
 import Admin from './pages/Admin';
 import InsightApproval from './pages/InsightApproval';
 import './App.css';
-import { requestNotificationPermission, saveFCMTokenToUser } from './notification';
+import { requestNotificationPermission, saveFCMTokenToUser, registerIplNotificationSoundHandlers } from './notification';
 import { useEffect } from 'react';
 import { useAuth } from './context/AuthContext';
 
@@ -30,6 +30,11 @@ function NotificationRegistration() {
       }
     }
     register();
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user?.uid) return undefined;
+    return registerIplNotificationSoundHandlers();
   }, [user?.uid]);
 
   return null;

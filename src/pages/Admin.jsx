@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useAutoDismiss } from '../hooks/useAutoDismiss';
-import { collection, addDoc, getDocs, getDoc, doc, setDoc, updateDoc, deleteDoc, query, where, increment, runTransaction } from 'firebase/firestore';
+import { collection, addDoc, getDocs, getDoc, doc, setDoc, updateDoc, deleteDoc, query, where, increment, runTransaction, writeBatch } from 'firebase/firestore';
 import { db, callFunction } from '../firebase/config';
 import Sidebar from '../components/Sidebar';
 import { toInitCap } from '../utils/format';
@@ -108,7 +108,9 @@ function parseImportedMatches(jsonString) {
     const thresholdTime = (m?.thresholdTime || '18:00').toString().trim();
     const status = (m?.status || 'open').toString().trim().toLowerCase();
     const matchNumber = (m?.matchNumber ?? m?.matchId ?? String(i + 1)).toString().trim();
-    matches.push({
+    const stadium = (m?.stadium || '').toString().trim();
+    const city = (m?.city || '').toString().trim();
+    const row = {
       matchNumber: matchNumber || String(i + 1),
       team1,
       team2,
@@ -116,7 +118,10 @@ function parseImportedMatches(jsonString) {
       time: /^\d{1,2}:\d{2}$/.test(time) ? time : '19:00',
       thresholdTime: /^\d{1,2}:\d{2}$/.test(thresholdTime) ? thresholdTime : '18:00',
       status: status || 'open',
-    });
+    };
+    if (stadium) row.stadium = stadium;
+    if (city) row.city = city;
+    matches.push(row);
   }
   if (matches.length === 0) return { error: 'No valid matches found. Each match needs team1, team2, date.' };
   return { matches };
@@ -144,6 +149,8 @@ export default function Admin() {
     date: '',
     time: '19:00',
     thresholdTime: '18:00',
+    stadium: '',
+    city: '',
   });
   const [editingMatch, setEditingMatch] = useState(null);
   const [editingTeam, setEditingTeam] = useState(null);
@@ -598,13 +605,25 @@ export default function Admin() {
     }
     setImportMatchLoading(true);
     try {
+      const createdAt = new Date().toISOString();
+      const BATCH = 450;
+      let batch = writeBatch(db);
+      let n = 0;
       for (const m of result.matches) {
-        await addDoc(collection(db, 'matches'), {
+        const ref = doc(collection(db, 'matches'));
+        batch.set(ref, {
           ...m,
           createdBy: user.uid,
-          createdAt: new Date().toISOString(),
+          createdAt,
         });
+        n += 1;
+        if (n >= BATCH) {
+          await batch.commit();
+          batch = writeBatch(db);
+          n = 0;
+        }
       }
+      if (n > 0) await batch.commit();
       setImportMatchJsonText('');
       setMessage(`Imported ${result.matches.length} matches successfully`);
       fetchData();
@@ -729,6 +748,8 @@ export default function Admin() {
       return;
     }
     const matchNumber = String(matchForm.matchNumber).trim();
+    const stadium = (matchForm.stadium || '').trim();
+    const city = (matchForm.city || '').trim();
     try {
       await addDoc(collection(db, 'matches'), {
         matchNumber,
@@ -738,10 +759,21 @@ export default function Admin() {
         time: matchForm.time || '19:00',
         thresholdTime: matchForm.thresholdTime || '18:00',
         status: 'open',
+        ...(stadium ? { stadium } : {}),
+        ...(city ? { city } : {}),
         createdBy: user.uid,
         createdAt: new Date().toISOString(),
       });
-      setMatchForm(prev => ({ matchNumber: '', team1: '', team2: '', date: prev.date, time: '19:00', thresholdTime: '18:00' }));
+      setMatchForm(prev => ({
+        matchNumber: '',
+        team1: '',
+        team2: '',
+        date: prev.date,
+        time: '19:00',
+        thresholdTime: '18:00',
+        stadium: '',
+        city: '',
+      }));
       setMessage('Match added successfully');
       fetchData();
     } catch (err) {
@@ -766,6 +798,8 @@ export default function Admin() {
       thresholdTime,
       status: match.status || 'open',
       winner: match.winner || '',
+      stadium: match.stadium || '',
+      city: match.city || '',
     });
   };
 
@@ -786,6 +820,8 @@ export default function Admin() {
       return;
     }
     try {
+      const est = (editingMatch.stadium || '').trim();
+      const ecity = (editingMatch.city || '').trim();
       await updateDoc(doc(db, 'matches', editingMatch.id), {
         matchNumber: (editingMatch.matchNumber || '').toString().trim(),
         team1: editingMatch.team1,
@@ -795,6 +831,8 @@ export default function Admin() {
         thresholdTime: editingMatch.thresholdTime,
         status: editingMatch.status || 'open',
         winner: editingMatch.winner || null,
+        stadium: est || null,
+        city: ecity || null,
       });
       setEditingMatch(null);
       setMessage('Match updated successfully');
@@ -1648,13 +1686,16 @@ export default function Admin() {
             <h3>Import Matches (bulk)</h3>
             <div className="import-players-section">
               <h5>Paste JSON array</h5>
-              <p className="import-hint">Paste a JSON array of matches. Include <strong>matchId</strong> (or matchNumber) for each. Format: <code>[{'{'} "matchId": "1", "team1": "PUNJAB KINGS", "team2": "GUJARAT TITANS", "date": "2026-03-31", "time": "19:30", "thresholdTime": "19:00", "status": "open" {'}'}, ...]</code></p>
+              <p className="import-hint">
+                Paste a JSON <strong>array</strong> of matches (or <code>{'{'}"matches": [ ... ]{'}'}</code>). Each row needs <strong>team1</strong>, <strong>team2</strong>, <strong>date</strong> (YYYY-MM-DD). Optional: <strong>matchId</strong>/<strong>matchNumber</strong>, <strong>time</strong>, <strong>thresholdTime</strong>, <strong>status</strong>, <strong>stadium</strong>, <strong>city</strong>.
+                Bulk import uses batched writes (up to 450 per batch).
+              </p>
               <textarea
                 value={importMatchJsonText}
                 onChange={(e) => { setImportMatchJsonText(e.target.value); setImportMatchError(''); }}
-                placeholder={`[\n  { "matchId": "1", "team1": "PUNJAB KINGS", "team2": "GUJARAT TITANS", "date": "2026-03-31", "time": "19:30", "thresholdTime": "19:00", "status": "open" },\n  { "matchId": "2", "team1": "MI", "team2": "CSK", "date": "2026-04-01", ... },\n  ...\n]`}
+                placeholder={`[\n  { "matchId": "1", "team1": "PUNJAB KINGS", "team2": "GUJARAT TITANS", "date": "2026-03-31", "time": "19:30", "thresholdTime": "19:00", "stadium": "Narendra Modi Stadium", "city": "Ahmedabad", "status": "open" },\n  ...\n]`}
                 className="import-json-textarea"
-                rows={5}
+                rows={10}
               />
               {importMatchError && <p className="import-error">{importMatchError}</p>}
               <button type="button" className="btn btn-primary btn-sm" onClick={handleImportMatches} disabled={importMatchLoading || teams.length === 0}>
@@ -1728,6 +1769,30 @@ export default function Admin() {
                     value={matchForm.thresholdTime}
                     onChange={(e) => setMatchForm(prev => ({ ...prev, thresholdTime: e.target.value }))}
                     title="Users must predict before this time"
+                  />
+                </div>
+              </div>
+              <div className="form-row match-venue-row">
+                <div className="form-group-inline" style={{ flex: 1, minWidth: '140px' }}>
+                  <label htmlFor="match-stadium">Stadium (optional)</label>
+                  <input
+                    id="match-stadium"
+                    type="text"
+                    value={matchForm.stadium}
+                    onChange={(e) => setMatchForm(prev => ({ ...prev, stadium: e.target.value }))}
+                    placeholder="e.g. Wankhede Stadium"
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="form-group-inline" style={{ flex: 1, minWidth: '120px' }}>
+                  <label htmlFor="match-city">City (optional)</label>
+                  <input
+                    id="match-city"
+                    type="text"
+                    value={matchForm.city}
+                    onChange={(e) => setMatchForm(prev => ({ ...prev, city: e.target.value }))}
+                    placeholder="e.g. Mumbai"
+                    autoComplete="off"
                   />
                 </div>
               </div>
@@ -1808,6 +1873,30 @@ export default function Admin() {
                       {editingMatch.team1 && editingMatch.team2 && editingMatch.team1 === editingMatch.team2 && (
                         <p className="alert alert-error">Team 1 and Team 2 must be different.</p>
                       )}
+                      <div className="form-row match-venue-row">
+                        <div className="form-group-inline" style={{ flex: 1, minWidth: '140px' }}>
+                          <label htmlFor="edit-match-stadium">Stadium (optional)</label>
+                          <input
+                            id="edit-match-stadium"
+                            type="text"
+                            value={editingMatch.stadium || ''}
+                            onChange={(e) => setEditingMatch(prev => ({ ...prev, stadium: e.target.value }))}
+                            placeholder="e.g. Wankhede Stadium"
+                            autoComplete="off"
+                          />
+                        </div>
+                        <div className="form-group-inline" style={{ flex: 1, minWidth: '120px' }}>
+                          <label htmlFor="edit-match-city">City (optional)</label>
+                          <input
+                            id="edit-match-city"
+                            type="text"
+                            value={editingMatch.city || ''}
+                            onChange={(e) => setEditingMatch(prev => ({ ...prev, city: e.target.value }))}
+                            placeholder="e.g. Mumbai"
+                            autoComplete="off"
+                          />
+                        </div>
+                      </div>
                       <div className="form-row">
                         <input
                           type="date"
@@ -1881,6 +1970,9 @@ export default function Admin() {
                         {m.matchNumber && <span className="match-id-badge">#{m.matchNumber}</span>}
                         <span className="match-teams">{getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)}</span>
                         <span className="match-meta">{m.date} · {formatMatchTime(m.time || m.slot)}</span>
+                        {(m.stadium || m.city) && (
+                          <span className="match-venue-inline">🏟 {[m.stadium, m.city].filter(Boolean).join(' · ')}</span>
+                        )}
                         {m.winner && <span className="match-winner">Winner: {getTeamCode(m.winner, teams)}</span>}
                         <span className={`match-status ${(m.status || 'open').toLowerCase() === 'completed' ? 'completed' : m.date === todayCal ? 'today' : 'open'}`}>
                         {(m.status || 'open').toLowerCase() === 'completed'

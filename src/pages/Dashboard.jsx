@@ -100,6 +100,14 @@ function getTeamCode(teamName, teams) {
   return (t?.code || '').trim() || teamName || '';
 }
 
+function formatMatchVenue(match) {
+  const stadium = (match?.stadium || '').trim();
+  const city = (match?.city || '').trim();
+  if (!stadium && !city) return null;
+  if (stadium && city) return `${stadium} · ${city}`;
+  return stadium || city;
+}
+
 function normalizePlayers(players) {
   if (!Array.isArray(players)) return [];
   return players.map(p => {
@@ -1182,6 +1190,9 @@ export default function Dashboard() {
                       {' vs '}
                       <span className={selectedMatchFilter === match.id ? 'team-highlight' : ''}>{getTeamCode(match.team2, teams)}</span>
                     </h3>
+                    {formatMatchVenue(match) && (
+                      <p className="match-venue">🏟 {formatMatchVenue(match)}</p>
+                    )}
                   </div>
                   <div className="match-prediction">
                         {!canUserPredict(userProfile, programConfig) ? (
@@ -1358,6 +1369,9 @@ export default function Dashboard() {
                           {' vs '}
                           <span className={selectedHistoryMatchFilter === match.id ? 'team-highlight' : ''}>{getTeamCode(match.team2, teams)}</span>
                         </h3>
+                        {formatMatchVenue(match) && (
+                          <p className="match-venue">🏟 {formatMatchVenue(match)}</p>
+                        )}
                         {match.winner && <p className="match-winner-badge">🏆 Winner: {getTeamCode(match.winner, teams)}</p>}
                       </div>
                       {(() => {
@@ -1762,6 +1776,9 @@ export default function Dashboard() {
                           {formatMatchTime(m.time || m.slot)} · Predict before {formatMatchTime(m.thresholdTime || m.time)}
                           <span className="muted"> · {(m.status || 'open').toLowerCase() === 'completed' ? 'completed' : m.date === today ? 'today' : 'upcoming'}</span>
                         </span>
+                        {formatMatchVenue(m) && (
+                          <span className="today-match-modal-venue">🏟 {formatMatchVenue(m)}</span>
+                        )}
                       </div>
                       {!canUserPredict(userProfile, programConfig) ? (
                         <p className="prediction-closed">Awaiting admin approval to predict. Contact admin.</p>

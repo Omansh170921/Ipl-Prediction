@@ -1,9 +1,44 @@
+import { onMessage } from "firebase/messaging";
 import { messaging } from "./firebase/config";
 import { getToken } from "firebase/messaging";
 import { doc, updateDoc } from "firebase/firestore";
 import { db } from "./firebase/config";
 
 const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY || '';
+
+/** Served from /public/sounds — replace ipl-notification.wav with your own IPL clip if you prefer. */
+export const IPL_NOTIFICATION_SOUND_URL = "/sounds/ipl-notification.wav";
+
+export function playIplNotificationSound() {
+  try {
+    const audio = new Audio(IPL_NOTIFICATION_SOUND_URL);
+    audio.volume = 0.85;
+    void audio.play().catch(() => {});
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * When the app is in the foreground, FCM delivers messages here — play the IPL chime.
+ * (Background pushes use the OS notification sound + vibrate from the service worker.)
+ */
+export function registerIplNotificationSoundHandlers() {
+  if (typeof window === "undefined") return () => {};
+
+  let unsub = null;
+  try {
+    unsub = onMessage(messaging, () => {
+      playIplNotificationSound();
+    });
+  } catch {
+    /* FCM not supported */
+  }
+
+  return () => {
+    if (typeof unsub === "function") unsub();
+  };
+}
 
 export const requestNotificationPermission = async () => {
   try {
@@ -31,7 +66,7 @@ export const requestNotificationPermission = async () => {
 export const saveFCMTokenToUser = async (userId, token) => {
   if (!userId || !token) return false;
   try {
-    await updateDoc(doc(db, 'users', userId), {
+    await updateDoc(doc(db, "users", userId), {
       fcmToken: token,
       fcmTokenUpdatedAt: new Date().toISOString(),
     });

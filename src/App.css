@@ -545,6 +545,13 @@ button.stat-card.stat-card-clickable:hover {
   color: var(--text-muted);
 }
 
+.today-match-modal-venue {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-top: 0.35rem;
+}
+
 .today-match-modal-prediction {
   margin-top: 0.5rem;
 }
@@ -1040,6 +1047,13 @@ button.stat-card.stat-card-clickable:hover {
   font-size: 1.15rem;
   margin-bottom: 1rem;
   color: var(--text);
+}
+
+.match-venue {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin: -0.5rem 0 0.75rem 0;
+  line-height: 1.35;
 }
 
 .match-prediction label {
@@ -2549,6 +2563,14 @@ button.stat-card.stat-card-clickable:hover {
 .match-meta {
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+.match-venue-inline {
+  display: block;
+  width: 100%;
+  flex-basis: 100%;
+  font-size: 0.85rem;
+  color: var(--text-muted);
 }
 
 .match-status {

@@ -17,7 +17,17 @@ messaging.onBackgroundMessage((payload) => {
   const { title, body } = payload.notification || {};
   const data = payload.data || {};
   const url = (data.url || '/dashboard').startsWith('/') ? (data.url || '/dashboard') : '/dashboard';
-  const options = { body: body || '', icon: '/favicon.png', data: { url } };
+  const tag = ['fcm', data.type || '', data.matchId || ''].filter(Boolean).join('-') || 'ipl-fcm';
+  const options = {
+    body: body || '',
+    icon: '/favicon.png',
+    badge: '/favicon.png',
+    vibrate: [180, 100, 180],
+    silent: false,
+    tag,
+    renotify: true,
+    data: { url },
+  };
   self.registration.showNotification(title || 'IPL Prediction', options);
 });
 

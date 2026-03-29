@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "generate-firebase-sw": "node scripts/generate-firebase-sw.js",
+    "generate-notification-sound": "node scripts/generate-ipl-notification-sound.js",
     "predev": "npm run generate-firebase-sw",
     "prebuild": "npm run generate-firebase-sw",
     "dev": "vite",
