@@ -69,6 +69,10 @@ export default function Sidebar({ admin = false, userProfile, user, onLogout, ac
               <span className="sidebar-icon">👤</span>
               Users
             </button>
+            <button type="button" className={`sidebar-link ${activeSection === 'exportPoints' ? 'active' : ''}`} onClick={() => { onSectionChange?.('exportPoints'); onMobileClose?.(); }}>
+              <span className="sidebar-icon">📥</span>
+              Export points
+            </button>
           </>
         ) : (
           <>

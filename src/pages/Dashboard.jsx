@@ -116,6 +116,13 @@ function normalizePlayers(players) {
   });
 }
 
+/** Tie-break for leaderboard rows: username, then email, then id. */
+function compareLeaderboardUsers(a, b) {
+  const na = (a.username || a.email || a.id || '').toString();
+  const nb = (b.username || b.email || b.id || '').toString();
+  return na.localeCompare(nb, undefined, { sensitivity: 'base' });
+}
+
 export default function Dashboard() {
   const location = useLocation();
   const { user, userProfile, logout, surrenderAccount, getSurrenderDeadline, changePassword } = useAuth();
@@ -478,7 +485,12 @@ export default function Dashboard() {
     let sortedByPoints = users.map(u => ({
       ...u,
       points: totals[u.id] ?? 0,
-    })).sort((a, b) => (b.points ?? 0) - (a.points ?? 0));
+    })).sort((a, b) => {
+      const pb = b.points ?? 0;
+      const pa = a.points ?? 0;
+      if (pb !== pa) return pb - pa;
+      return compareLeaderboardUsers(a, b);
+    });
     // Late users (joined on/after match start date, not yet approved): assign bottom user's total, not match-wise.
     // Approved users always use normal match-by-match pointResults.
     if (matchStartDate && sortedByPoints.length > 0) {
@@ -490,7 +502,12 @@ export default function Dashboard() {
           createdAtDate >= matchStartDate &&
           !isUserPredictionApproved(u);
         return isLateUser ? { ...u, points: bottomPoints, isLateUser: true } : { ...u, isLateUser: false };
-      }).sort((a, b) => (b.points ?? 0) - (a.points ?? 0));
+      }).sort((a, b) => {
+        const pb = b.points ?? 0;
+        const pa = a.points ?? 0;
+        if (pb !== pa) return pb - pa;
+        return compareLeaderboardUsers(a, b);
+      });
     }
     let rank = 1;
     const ranked = sortedByPoints.map((u, i) => {
@@ -514,7 +531,12 @@ export default function Dashboard() {
     });
     const sortedByInsight = [...users]
       .map(u => ({ ...u, insightPoints: insightTotals[u.id] ?? 0 }))
-      .sort((a, b) => (b.insightPoints ?? 0) - (a.insightPoints ?? 0));
+      .sort((a, b) => {
+        const ib = b.insightPoints ?? 0;
+        const ia = a.insightPoints ?? 0;
+        if (ib !== ia) return ib - ia;
+        return compareLeaderboardUsers(a, b);
+      });
     rank = 1;
     const insightRanked = sortedByInsight.map((u, i) => {
       if (i > 0 && (sortedByInsight[i - 1].insightPoints ?? 0) > (u.insightPoints ?? 0)) rank += 1;

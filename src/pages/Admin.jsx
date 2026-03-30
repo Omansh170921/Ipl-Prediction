@@ -5,9 +5,10 @@ import { collection, addDoc, getDocs, getDoc, doc, setDoc, updateDoc, deleteDoc,
 import { db, callFunction } from '../firebase/config';
 import Sidebar from '../components/Sidebar';
 import { toInitCap } from '../utils/format';
-import { calculateMatchPoints } from '../utils/points';
+import { calculateMatchPoints, to2Decimals } from '../utils/points';
 import { isPredictionEligible } from '../utils/match';
 import { getAppTodayDate } from '../utils/calendarDate';
+import * as XLSX from 'xlsx';
 
 function formatMatchTime(time) {
   if (!time) return 'TBD';
@@ -210,6 +211,13 @@ export default function Admin() {
   const [expandedInsightMatchId, setExpandedInsightMatchId] = useState(null);
   const [participantsModal, setParticipantsModal] = useState(null);
   const [participantsLoading, setParticipantsLoading] = useState(false);
+  const [pointsExportFrom, setPointsExportFrom] = useState(() => {
+    const t = getAppTodayDate();
+    const [y, m] = t.split('-').map(Number);
+    return `${y}-${String(m).padStart(2, '0')}-01`;
+  });
+  const [pointsExportTo, setPointsExportTo] = useState(() => getAppTodayDate());
+  const [pointsExportLoading, setPointsExportLoading] = useState(false);
 
   const todayCal = getAppTodayDate();
 
@@ -960,6 +968,110 @@ export default function Admin() {
       setMessage('Error deleting matches: ' + (err.message || ''));
     }
     setBulkDeleteLoading(false);
+  };
+
+  const handleExportPointsExcel = async () => {
+    const from = (pointsExportFrom || '').trim();
+    const to = (pointsExportTo || '').trim();
+    if (!from || !to) {
+      setMessage('Select both start and end dates.');
+      return;
+    }
+    if (from > to) {
+      setMessage('Start date must be on or before end date.');
+      return;
+    }
+    setPointsExportLoading(true);
+    try {
+      const [matchesSnap, usersSnap, predsSnap] = await Promise.all([
+        getDocs(collection(db, 'matches')),
+        getDocs(collection(db, 'users')),
+        getDocs(collection(db, 'predictions')),
+      ]);
+      const usersById = new Map();
+      usersSnap.docs.forEach((d) => {
+        usersById.set(d.id, { id: d.id, ...d.data() });
+      });
+      const predKey = (mid, uid) => `${String(mid)}|${String(uid)}`;
+      const predMap = new Map();
+      predsSnap.docs.forEach((d) => {
+        const x = d.data();
+        const mid = x.matchId ?? x.matchID;
+        const uid = x.userId ?? x.uid;
+        if (mid == null || uid == null) return;
+        predMap.set(predKey(mid, uid), (x.predictedWinner || '').trim());
+      });
+      const rows = [];
+      /** @type {Map<string, { sum: number, matches: number }>} */
+      const leaderboardTotals = new Map();
+      matchesSnap.docs.forEach((d) => {
+        const match = { id: d.id, ...d.data() };
+        const date = (match.date || '').trim();
+        if (!date || date < from || date > to) return;
+        const pr = match.pointResults;
+        if (!pr || typeof pr !== 'object') return;
+        Object.entries(pr).forEach(([uid, pts]) => {
+          const u = usersById.get(uid);
+          if (u?.isAdmin || u?.isAdmin === 'true') return;
+          const raw = typeof pts === 'number' ? pts : Number(pts);
+          const n = Number.isFinite(raw) ? raw : 0;
+          const predicted = predMap.get(predKey(match.id, uid)) ?? '';
+          rows.push({
+            'Match date': date,
+            'Username': (u?.username || '').trim() || (u?.email || '').trim() || uid,
+            'Team A': match.team1 || '',
+            'Team B': match.team2 || '',
+            'Predicted winner': predicted,
+            'Winner': (match.winner || '').trim(),
+            'Points': n,
+          });
+          const agg = leaderboardTotals.get(uid) || { sum: 0, matches: 0 };
+          agg.sum += n;
+          agg.matches += 1;
+          leaderboardTotals.set(uid, agg);
+        });
+      });
+      rows.sort((a, b) => {
+        const c = a['Match date'].localeCompare(b['Match date']);
+        if (c !== 0) return c;
+        return a.Username.localeCompare(b.Username);
+      });
+      if (rows.length === 0) {
+        setMessage('No point data in that date range. Matches need calculated points and must fall within the range.');
+        setPointsExportLoading(false);
+        return;
+      }
+      const leaderboardRows = Array.from(leaderboardTotals.entries()).map(([uid, { sum, matches: matchCount }]) => {
+        const u = usersById.get(uid);
+        return {
+          Rank: 0,
+          Username: (u?.username || '').trim() || (u?.email || '').trim() || uid,
+          'Total points': to2Decimals(sum),
+          'Matches counted': matchCount,
+        };
+      });
+      leaderboardRows.sort((a, b) => b['Total points'] - a['Total points']);
+      for (let i = 0; i < leaderboardRows.length; i++) {
+        if (i === 0) {
+          leaderboardRows[i].Rank = 1;
+        } else if (leaderboardRows[i]['Total points'] === leaderboardRows[i - 1]['Total points']) {
+          leaderboardRows[i].Rank = leaderboardRows[i - 1].Rank;
+        } else {
+          leaderboardRows[i].Rank = i + 1;
+        }
+      }
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Points');
+      const wsLb = XLSX.utils.json_to_sheet(leaderboardRows);
+      XLSX.utils.book_append_sheet(wb, wsLb, 'Leaderboard');
+      const fname = `points-${from}-to-${to}.xlsx`;
+      XLSX.writeFile(wb, fname);
+      setMessage(`Exported ${rows.length} row(s) and leaderboard (${leaderboardRows.length} users) to ${fname}`);
+    } catch (err) {
+      setMessage('Export failed: ' + (err.message || 'unknown error'));
+    }
+    setPointsExportLoading(false);
   };
 
   const handleRemoveUser = async (targetUser) => {
@@ -1723,6 +1835,47 @@ export default function Admin() {
                   })}
               </ul>
             )}
+          </section>
+          )}
+
+          {activeSection === 'exportPoints' && (
+          <section id="section-export-points" className="admin-section">
+            <h2>Export points (Excel)</h2>
+            <p className="muted">
+              Sheet <strong>Points</strong>: one row per user per match (match date, username, teams, predicted winner, winner, points).
+              Sheet <strong>Leaderboard</strong>: total points per user for the same range, ranked (ties share rank).
+              Only matches with saved point results in the selected date range are included (non-admin users only).
+            </p>
+            <div className="config-grid" style={{ marginTop: '1rem', maxWidth: '520px' }}>
+              <div className="config-card">
+                <div className="config-item">
+                  <label htmlFor="export-from">From date</label>
+                  <input
+                    id="export-from"
+                    type="date"
+                    value={pointsExportFrom}
+                    onChange={(e) => setPointsExportFrom(e.target.value)}
+                  />
+                </div>
+                <div className="config-item">
+                  <label htmlFor="export-to">To date</label>
+                  <input
+                    id="export-to"
+                    type="date"
+                    value={pointsExportTo}
+                    onChange={(e) => setPointsExportTo(e.target.value)}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleExportPointsExcel}
+                  disabled={pointsExportLoading}
+                >
+                  {pointsExportLoading ? 'Preparing…' : 'Download .xlsx'}
+                </button>
+              </div>
+            </div>
           </section>
           )}
 
