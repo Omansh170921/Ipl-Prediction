@@ -1050,15 +1050,19 @@ export default function Admin() {
           'Matches counted': matchCount,
         };
       });
-      leaderboardRows.sort((a, b) => b['Total points'] - a['Total points']);
+      // Same order as Dashboard leaderboard: points desc, then username; dense rank (ties share rank, next rank +1 only when points drop).
+      leaderboardRows.sort((a, b) => {
+        const pb = Number(b['Total points']);
+        const pa = Number(a['Total points']);
+        if (pb !== pa) return pb - pa;
+        return (a.Username || '').localeCompare(b.Username || '', undefined, { sensitivity: 'base' });
+      });
+      let lbRank = 1;
       for (let i = 0; i < leaderboardRows.length; i++) {
-        if (i === 0) {
-          leaderboardRows[i].Rank = 1;
-        } else if (leaderboardRows[i]['Total points'] === leaderboardRows[i - 1]['Total points']) {
-          leaderboardRows[i].Rank = leaderboardRows[i - 1].Rank;
-        } else {
-          leaderboardRows[i].Rank = i + 1;
+        if (i > 0 && Number(leaderboardRows[i - 1]['Total points']) > Number(leaderboardRows[i]['Total points'])) {
+          lbRank += 1;
         }
+        leaderboardRows[i].Rank = lbRank;
       }
       const ws = XLSX.utils.json_to_sheet(rows);
       const wb = XLSX.utils.book_new();
