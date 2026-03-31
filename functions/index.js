@@ -272,7 +272,11 @@ exports.notifyPointsCalculated = functions.https.onCall(async (data, context) =>
     db.collection('matches').get(),
     db.collection('users').get(),
   ]);
-  const matchStartDate = (progSnap.data()?.matchStartDate || '').trim();
+  const progCfg = progSnap.data() || {};
+  const matchStartDate = (progCfg.matchStartDate || '').trim();
+  if (progCfg.notifyOnPointsCalculated === false) {
+    return { sent: 0, skipped: true };
+  }
 
   const totalsByUser = {};
   matchesSnap.docs.forEach((d) => {

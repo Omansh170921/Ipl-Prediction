@@ -1409,6 +1409,22 @@ button.stat-card.stat-card-clickable:hover {
   font-weight: 600;
 }
 
+.config-item-checkbox .config-checkbox-label {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0.6rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  line-height: 1.35;
+}
+
+.config-item-checkbox .config-checkbox-label input[type="checkbox"] {
+  margin-top: 0.15rem;
+  flex-shrink: 0;
+}
+
 .config-approvers {
   display: flex;
   flex-direction: column;
@@ -2333,8 +2349,28 @@ button.stat-card.stat-card-clickable:hover {
   grid-template-columns: 1fr auto;
 }
 
+.participants-list-header.cols-2,
+.participant-item.cols-2 {
+  grid-template-columns: 1fr auto;
+}
+
+.participants-list-header.cols-3,
+.participant-item.cols-3 {
+  grid-template-columns: minmax(0, 1fr) auto 4.5rem;
+}
+
+.participants-list-header.cols-4,
+.participant-item.cols-4 {
+  grid-template-columns: minmax(0, 1fr) auto 4.5rem 4rem;
+}
+
 .participants-list-header .col-points {
   text-align: right;
+}
+
+.participants-list-header .col-predicted-at {
+  text-align: right;
+  font-size: 0.8rem;
 }
 
 .participant-item {
@@ -2352,6 +2388,15 @@ button.stat-card.stat-card-clickable:hover {
 
 .participant-item.participant-item-no-points {
   grid-template-columns: 1fr auto;
+}
+
+.participant-predicted-at {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  text-align: right;
+  justify-self: end;
+  white-space: nowrap;
 }
 
 .participant-name {

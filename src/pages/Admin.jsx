@@ -8,6 +8,7 @@ import { toInitCap } from '../utils/format';
 import { calculateMatchPoints, to2Decimals } from '../utils/points';
 import { isPredictionEligible } from '../utils/match';
 import { getAppTodayDate } from '../utils/calendarDate';
+import { getPredictionSavedIso, formatTimeHH24 } from '../utils/predictionTime';
 import * as XLSX from 'xlsx';
 
 function formatMatchTime(time) {
@@ -182,6 +183,7 @@ export default function Admin() {
     scheduleIntervalMinutes: 10,
     loserPercent: 25,
     crowdPredictionVisibility: 'always',
+    notifyOnPointsCalculated: true,
   });
   const [cricketInsightsConfig, setCricketInsightsConfig] = useState({
     enabled: true,
@@ -235,13 +237,18 @@ export default function Admin() {
       predsSnap.docs.forEach(d => {
         const data = d.data();
         const userId = data.userId ?? data.uid ?? d.id?.split('_')?.[0];
-        predMap.set(userId, data.predictedWinner);
+        predMap.set(userId, {
+          predictedWinner: data.predictedWinner,
+          predictedAtIso: getPredictionSavedIso(data),
+        });
       });
       const allUsersList = (allUsers || []).filter(u => !u.isAdmin && u.isAdmin !== 'true');
       const participants = allUsersList.map(u => {
         const displayName = u?.username ? toInitCap(String(u.username || '').replace(/_/g, ' ')) : (u?.email || u.id || '—');
-        const predictedWinner = predMap.get(u.id) ?? null;
-        return { userId: u.id, predictedWinner, displayName };
+        const pred = predMap.get(u.id);
+        const predictedWinner = pred?.predictedWinner ?? null;
+        const predictedAtIso = pred?.predictedAtIso ?? null;
+        return { userId: u.id, predictedWinner, predictedAtIso, displayName };
       }).sort((a, b) => (a.displayName || '').localeCompare(b.displayName || ''));
       setParticipantsModal(prev => prev && prev.match?.id === match.id ? { ...prev, match: matchData, participants } : prev);
     } catch (err) {
@@ -316,6 +323,7 @@ export default function Admin() {
             scheduleIntervalMinutes: d.scheduleIntervalMinutes ?? 10,
             loserPercent: d.loserPercent ?? 25,
             crowdPredictionVisibility: d.crowdPredictionVisibility === 'afterCutoff' ? 'afterCutoff' : 'always',
+            notifyOnPointsCalculated: d.notifyOnPointsCalculated !== false,
           });
         }
       } catch {
@@ -910,14 +918,18 @@ export default function Admin() {
       await updateDoc(doc(db, 'matches', match.id), { pointResults });
       const s = summary || {};
       let notifyNote = '';
-      try {
-        const res = await callFunction('notifyPointsCalculated', { matchId: String(match.id) });
-        const sent = res?.data?.sent ?? 0;
-        notifyNote = ` Push notifications sent: ${sent}.`;
-      } catch (notifyErr) {
-        const msg = notifyErr?.message || notifyErr?.code || 'failed';
-        console.warn('notifyPointsCalculated', notifyErr);
-        notifyNote = ` Notifications not sent (${msg}). Points were saved.`;
+      if (programConfig.notifyOnPointsCalculated !== false) {
+        try {
+          const res = await callFunction('notifyPointsCalculated', { matchId: String(match.id) });
+          const sent = res?.data?.sent ?? 0;
+          notifyNote = ` Push notifications sent: ${sent}.`;
+        } catch (notifyErr) {
+          const msg = notifyErr?.message || notifyErr?.code || 'failed';
+          console.warn('notifyPointsCalculated', notifyErr);
+          notifyNote = ` Notifications not sent (${msg}). Points were saved.`;
+        }
+      } else {
+        notifyNote = ' Push notifications skipped (disabled in Program Config).';
       }
       setMessage(`Points calculated and saved. Winners: ${s.winners ?? 0}, Wrong: ${s.wrong ?? 0}, Not participated: ${s.notParticipated ?? 0}.${notifyNote}`);
       fetchData();
@@ -1129,6 +1141,7 @@ export default function Admin() {
       const loserPercent = Math.max(0, Math.min(50, parseInt(programConfig.loserPercent, 10) || 25));
       const crowdPredictionVisibility =
         programConfig.crowdPredictionVisibility === 'afterCutoff' ? 'afterCutoff' : 'always';
+      const notifyOnPointsCalculated = programConfig.notifyOnPointsCalculated !== false;
       await Promise.all([
         setDoc(doc(db, 'rules', 'pointRules'), {
           notParticipatedPoints: notParticipated,
@@ -1140,6 +1153,7 @@ export default function Admin() {
           scheduleIntervalMinutes: scheduleInterval,
           loserPercent: loserPercent,
           crowdPredictionVisibility,
+          notifyOnPointsCalculated,
           updatedAt: new Date().toISOString(),
         }),
         setDoc(doc(db, 'settings', 'passwordPolicy'), {
@@ -1178,6 +1192,7 @@ export default function Admin() {
         scheduleIntervalMinutes: scheduleInterval,
         loserPercent,
         crowdPredictionVisibility,
+        notifyOnPointsCalculated,
       }));
       setPasswordPolicy(prev => ({ ...prev, maxPasswordChanges: max, surrenderDeadline: deadline }));
       setCricketInsightsConfig(prev => ({ ...prev, enabled: cricketInsightsConfig.enabled, maxQuestionsPerUserPerMatch: maxPerUser, maxQuestionsPerMatch: maxPerMatch }));
@@ -1613,6 +1628,17 @@ export default function Admin() {
                     />
                   </div>
                   <p className="muted config-note">How often the prediction reminder is checked (1–60 min). Function runs every 5 min; this controls how often reminders are actually sent.</p>
+                  <div className="config-item config-item-checkbox">
+                    <label className="config-checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={programConfig.notifyOnPointsCalculated !== false}
+                        onChange={(e) => setProgramConfig(prev => ({ ...prev, notifyOnPointsCalculated: e.target.checked }))}
+                      />
+                      <span>Notify users (push) when points are calculated or recalculated</span>
+                    </label>
+                  </div>
+                  <p className="muted config-note">When off, Calculate Points / Recalculate still saves points but does not send &quot;Points calculated&quot; notifications.</p>
                   <div className="config-item">
                     <label>Loser % (bottom of leaderboard):</label>
                     <input
@@ -2367,6 +2393,12 @@ export default function Admin() {
                         const isCompleted = (m?.status || '').toLowerCase() === 'completed' && (m?.winner || '').trim();
                         const pointResults = m?.pointResults && typeof m.pointResults === 'object' ? m.pointResults : null;
                         const showPoints = isCompleted && pointResults;
+                        const showPredictedTime = !predictionsHidden;
+                        const colClass = predictionsHidden
+                          ? 'cols-2'
+                          : showPoints
+                            ? 'cols-4'
+                            : 'cols-3';
                         return (
                           <>
                             {predictionsHidden && (
@@ -2378,22 +2410,29 @@ export default function Admin() {
                               <p className="muted participants-points-note">Points for this match (after winner declared):</p>
                             )}
                             <ul className="participants-list">
-                              <li className={`participants-list-header ${!showPoints ? 'participants-list-header-2col' : ''}`}>
+                              <li className={`participants-list-header ${colClass}`}>
                                 <span>User</span>
                                 <span>Prediction</span>
+                                {showPredictedTime && <span className="col-predicted-at">Predicted at</span>}
                                 {showPoints && <span className="col-points">Points</span>}
                               </li>
                               {participantsModal.participants.map((p, i) => {
                                 const pts = showPoints && p.userId ? pointResults[p.userId] : undefined;
                                 const ptsNum = pts != null && !Number.isNaN(Number(pts)) ? Number(pts) : null;
+                                const timeStr = showPredictedTime ? formatTimeHH24(p.predictedAtIso) : null;
                                 return (
-                                  <li key={p.userId || i} className={`participant-item ${!showPoints ? 'participant-item-no-points' : ''}`}>
+                                  <li key={p.userId || i} className={`participant-item ${colClass}`}>
                                     <span className="participant-name">{p.displayName}</span>
                                     <span className="participant-prediction">
                                       {predictionsHidden
                                         ? '—'
                                         : (p.predictedWinner ? (getTeamCode(p.predictedWinner, teams) || p.predictedWinner) : '—')}
                                     </span>
+                                    {showPredictedTime && (
+                                      <span className="participant-predicted-at" title={p.predictedAtIso || undefined}>
+                                        {timeStr}
+                                      </span>
+                                    )}
                                     {showPoints && (
                                       <span className={`participant-points ${ptsNum != null && ptsNum >= 0 ? 'points-positive' : 'points-negative'}`}>
                                         {ptsNum != null ? (ptsNum >= 0 ? '+' : '') + ptsNum : '—'}
