@@ -126,7 +126,7 @@ function compareLeaderboardUsers(a, b) {
 
 export default function Dashboard() {
   const location = useLocation();
-  const { user, userProfile, logout, surrenderAccount, getSurrenderDeadline, changePassword } = useAuth();
+  const { user, userProfile, logout, surrenderAccount, getSurrenderDeadline, changePassword, updateUsername } = useAuth();
   const [matches, setMatches] = useState([]);
   const [allMatches, setAllMatches] = useState([]);
   const [rules, setRules] = useState([]);
@@ -164,6 +164,9 @@ export default function Dashboard() {
   const [cpConfirmPassword, setCpConfirmPassword] = useState('');
   const [cpLoading, setCpLoading] = useState(false);
   const [cpMessage, setCpMessage] = useState('');
+  const [usernameInput, setUsernameInput] = useState('');
+  const [usernameSaving, setUsernameSaving] = useState(false);
+  const [usernameMessage, setUsernameMessage] = useState('');
   const [expandedInsightMatchId, setExpandedInsightMatchId] = useState(null);
   const [participantsModal, setParticipantsModal] = useState(null);
   const [participantsLoading, setParticipantsLoading] = useState(false);
@@ -197,6 +200,13 @@ export default function Dashboard() {
 
   useAutoDismiss(surrenderError, setSurrenderError);
   useAutoDismiss(cpMessage, setCpMessage);
+  useAutoDismiss(usernameMessage, setUsernameMessage);
+
+  useEffect(() => {
+    if (activeSection !== 'account' || !userProfile) return;
+    const u = (userProfile.username || '').toString();
+    setUsernameInput(u.replace(/_/g, ' ').trim());
+  }, [activeSection, userProfile?.username]);
 
   const getMatchNum = (m) => parseInt(String(m.matchNumber || m.id || '0'), 10) || 0;
   const todayMatches = allMatches.filter(m => m.date === today);
@@ -576,6 +586,19 @@ export default function Dashboard() {
       setCpMessage(err?.message?.includes('limit') ? err.message : 'Invalid credential please validate.');
     }
     setCpLoading(false);
+  };
+
+  const handleUpdateUsername = async (e) => {
+    e.preventDefault();
+    setUsernameMessage('');
+    setUsernameSaving(true);
+    try {
+      await updateUsername(usernameInput);
+      setUsernameMessage('Username updated successfully.');
+    } catch (err) {
+      setUsernameMessage(err?.message || 'Failed to update username');
+    }
+    setUsernameSaving(false);
   };
 
   const handleSurrenderAccount = async () => {
@@ -1086,7 +1109,7 @@ export default function Dashboard() {
           </section>
         )}
 
-        {activeSection === 'account' && !userProfile?.isAdmin && (
+        {activeSection === 'account' && (
         <section className="rules-section account-section">
           <h2>Account</h2>
           <div className="account-details">
@@ -1096,9 +1119,42 @@ export default function Dashboard() {
               <dd>{toInitCap(userProfile?.username || '—')}</dd>
               <dt>Email</dt>
               <dd>{user?.email || '—'}</dd>
+              {userProfile?.isAdmin && (
+                <>
+                  <dt>Role</dt>
+                  <dd>Admin</dd>
+                </>
+              )}
             </dl>
           </div>
-          <div className="account-actions account-actions-row">
+          <form className="account-form account-username-form" onSubmit={handleUpdateUsername}>
+            <h3>Change username</h3>
+            <p className="muted">Letters, numbers, spaces, or underscores. This is used to log in and shown across the app.</p>
+            {usernameMessage && (
+              <div className={`alert alert-toast ${usernameMessage.includes('success') ? 'alert-success' : 'alert-error'}`}>
+                {usernameMessage}
+              </div>
+            )}
+            <div className="form-group">
+              <label htmlFor="account-username">New username</label>
+              <input
+                id="account-username"
+                type="text"
+                value={usernameInput}
+                onChange={(e) => setUsernameInput(e.target.value)}
+                placeholder="Your username"
+                autoComplete="username"
+                disabled={usernameSaving}
+                maxLength={40}
+              />
+            </div>
+            <div className="account-username-submit-row">
+              <button type="submit" className="btn btn-primary" disabled={usernameSaving}>
+                {usernameSaving ? 'Saving…' : 'Save username'}
+              </button>
+            </div>
+          </form>
+          <div className="account-actions account-actions-row" role="group" aria-label="Account actions">
             <button type="button" className="btn btn-primary" onClick={logout}>
               Logout
             </button>
@@ -1109,44 +1165,19 @@ export default function Dashboard() {
             >
               Change Password
             </button>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => { setShowSurrenderModal(true); setSurrenderError(''); }}
-            >
-              Surrender Account
-            </button>
+            {!userProfile?.isAdmin && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => { setShowSurrenderModal(true); setSurrenderError(''); }}
+              >
+                Surrender Account
+              </button>
+            )}
           </div>
-        </section>
-        )}
-
-        {activeSection === 'account' && userProfile?.isAdmin && (
-        <section className="rules-section account-section">
-          <h2>Account</h2>
-          <div className="account-details">
-            <h3>Your Details</h3>
-            <dl className="account-details-list">
-              <dt>Username</dt>
-              <dd>{toInitCap(userProfile?.username || '—')}</dd>
-              <dt>Email</dt>
-              <dd>{user?.email || '—'}</dd>
-              <dt>Role</dt>
-              <dd>Admin</dd>
-            </dl>
-          </div>
-          <div className="account-actions account-actions-row">
-            <button type="button" className="btn btn-primary" onClick={logout}>
-              Logout
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => { setShowChangePasswordModal(true); setCpMessage(''); }}
-            >
-              Change Password
-            </button>
-          </div>
-          <p className="muted" style={{ marginTop: '1rem' }}>Admin accounts cannot surrender. Use the Admin Panel to manage users.</p>
+          {userProfile?.isAdmin && (
+            <p className="muted" style={{ marginTop: '1rem' }}>Admin accounts cannot surrender. Use the Admin Panel to manage users.</p>
+          )}
         </section>
         )}
 

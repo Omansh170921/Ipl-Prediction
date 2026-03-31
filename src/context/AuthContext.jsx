@@ -9,7 +9,7 @@ import {
   reauthenticateWithCredential,
   EmailAuthProvider,
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, query, where, getDocs, runTransaction } from 'firebase/firestore';
 import { auth, db, callFunction } from '../firebase/config';
 import { createAndSendOTP } from '../services/otp';
 import { getAppTodayDate } from '../utils/calendarDate';
@@ -188,6 +188,49 @@ export function AuthProvider({ children }) {
     return { success: true };
   };
 
+  /**
+   * Updates display/login username: users/{uid}.username + usernameLookup index.
+   * Normalized like registration (lowercase, spaces → underscores).
+   */
+  const updateUsername = async (newUsernameRaw) => {
+    if (!user?.uid) throw new Error('Not logged in');
+    const trimmed = (newUsernameRaw || '').trim();
+    if (!trimmed) throw new Error('Username is required');
+    if (trimmed.length < 2) throw new Error('Username must be at least 2 characters');
+    if (trimmed.length > 40) throw new Error('Username must be 40 characters or less');
+    if (!/^[a-zA-Z0-9_\s]+$/.test(trimmed)) {
+      throw new Error('Use only letters, numbers, spaces, and underscores');
+    }
+    const newKey = trimmed.toLowerCase().replace(/\s+/g, '_');
+    const oldKey = (userProfile?.username || '').toLowerCase().trim().replace(/\s+/g, '_');
+    if (newKey === oldKey) {
+      return { success: true };
+    }
+
+    await runTransaction(db, async (transaction) => {
+      const newLookupRef = doc(db, 'usernameLookup', newKey);
+      const newSnap = await transaction.get(newLookupRef);
+      if (newSnap.exists()) {
+        const uid = newSnap.data()?.userId;
+        if (uid && uid !== user.uid) {
+          throw new Error('That username is already taken');
+        }
+      }
+      const userRef = doc(db, 'users', user.uid);
+      if (oldKey && oldKey !== newKey) {
+        transaction.delete(doc(db, 'usernameLookup', oldKey));
+      }
+      transaction.set(newLookupRef, { email: user.email, userId: user.uid });
+      transaction.update(userRef, {
+        username: newKey,
+        updatedAt: new Date().toISOString(),
+      });
+    });
+
+    setUserProfile((prev) => (prev ? { ...prev, username: newKey } : null));
+    return { success: true };
+  };
+
   const changePasswordFromLogin = async (email, currentPassword, newPassword) => {
     const { user: signedInUser } = await signInWithEmailAndPassword(auth, email.trim(), currentPassword);
     try {
@@ -214,6 +257,7 @@ export function AuthProvider({ children }) {
     changePassword,
     changePasswordFromLogin,
     getPasswordChangeLimit,
+    updateUsername,
   };
 
   return (
