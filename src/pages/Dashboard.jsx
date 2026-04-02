@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useAutoDismiss } from '../hooks/useAutoDismiss';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import CricketInsights from '../components/CricketInsights';
 import { useAuth } from '../context/AuthContext';
 import { collection, query, where, getDocs, getDoc, doc, setDoc } from 'firebase/firestore';
@@ -117,6 +117,8 @@ function normalizePlayers(players) {
   });
 }
 
+const DASHBOARD_SECTION_IDS = ['dashboard', 'teams', 'rules', 'matches', 'leaderboard', 'account'];
+
 /** Tie-break for leaderboard rows: username, then email, then id. */
 function compareLeaderboardUsers(a, b) {
   const na = (a.username || a.email || a.id || '').toString();
@@ -126,6 +128,7 @@ function compareLeaderboardUsers(a, b) {
 
 export default function Dashboard() {
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const { user, userProfile, logout, surrenderAccount, getSurrenderDeadline, changePassword, updateUsername } = useAuth();
   const [matches, setMatches] = useState([]);
   const [allMatches, setAllMatches] = useState([]);
@@ -187,10 +190,34 @@ export default function Dashboard() {
 
   useEffect(() => {
     const section = location.state?.section;
-    if (section && ['dashboard', 'teams', 'rules', 'matches', 'leaderboard', 'account'].includes(section)) {
+    if (section && DASHBOARD_SECTION_IDS.includes(section)) {
       setActiveSection(section);
     }
   }, [location.state?.section]);
+
+  /** Deep link from push: /dashboard?section=matches&focusMatch=<id> */
+  useEffect(() => {
+    const sec = searchParams.get('section');
+    if (sec && DASHBOARD_SECTION_IDS.includes(sec)) {
+      setActiveSection(sec);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    const focusMatchId = searchParams.get('focusMatch');
+    if (!focusMatchId || loading || !allMatches.length) return;
+    const m = allMatches.find((x) => String(x.id) === String(focusMatchId));
+    if (!m) return;
+    const isTodayCard = m.date === today;
+    if (isTodayCard) {
+      setActiveTab('today');
+      setSelectedMatchFilter(m.id);
+    } else {
+      setActiveTab('history');
+      if (m.date) setMatchFilterDate(m.date);
+      setSelectedHistoryMatchFilter(m.id);
+    }
+  }, [searchParams, loading, allMatches, today]);
 
   useEffect(() => {
     if (activeSection === 'account' && user) {
@@ -281,6 +308,17 @@ export default function Dashboard() {
   const historyMatches = sortMatches(historyMatchesFiltered);
 
   useEffect(() => {
+    const focusMatchId = searchParams.get('focusMatch');
+    if (!focusMatchId || loading || activeSection !== 'matches') return;
+    const el = document.getElementById(`match-${focusMatchId}`);
+    if (!el) return;
+    const id = window.setTimeout(() => {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 200);
+    return () => window.clearTimeout(id);
+  }, [searchParams, loading, activeSection, activeTab, filteredMatches.length, historyMatches.length]);
+
+  useEffect(() => {
     if (selectedMatchFilter !== 'All' && !todayMatches.some(m => m.id === selectedMatchFilter)) {
       setSelectedMatchFilter('All');
     }
@@ -337,7 +375,7 @@ export default function Dashboard() {
         qSnap.docs.forEach(d => {
           const data = d.data();
           const mid = data.matchId;
-          if (mid) counts[mid] = (counts[mid] || 0) + 1;
+          if (mid && data.answersDisabled !== true) counts[mid] = (counts[mid] || 0) + 1;
           if (data.correctAnswer != null) answeredQuestions.push({ id: d.id, matchId: mid, correctAnswer: data.correctAnswer });
         });
         setInsightQuestionCount(counts);
@@ -1233,7 +1271,7 @@ export default function Dashboard() {
           ) : (
             <div className="matches-grid">
               {filteredMatches.map((match, idx) => (
-                <div key={match.id} className="match-card">
+                <div key={match.id} id={`match-${match.id}`} className="match-card">
                   <div className="match-card-icons">
                     {!isPredictionEligible(match) && (
                       <button
@@ -1406,7 +1444,7 @@ export default function Dashboard() {
               ) : (
                 <div className="matches-grid history-grid">
                   {historyMatches.map((match, idx) => (
-                    <div key={match.id} className="match-card match-card-history">
+                    <div key={match.id} id={`match-${match.id}`} className="match-card match-card-history">
                       <div className="match-card-icons">
                         {!isPredictionEligible(match) && (
                           <button

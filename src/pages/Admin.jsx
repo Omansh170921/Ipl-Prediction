@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useAutoDismiss } from '../hooks/useAutoDismiss';
 import { collection, addDoc, getDocs, getDoc, doc, setDoc, updateDoc, deleteDoc, deleteField, query, where, increment, runTransaction, writeBatch } from 'firebase/firestore';
@@ -9,6 +9,7 @@ import { calculateMatchPoints, to2Decimals } from '../utils/points';
 import { isPredictionEligible } from '../utils/match';
 import { getAppTodayDate } from '../utils/calendarDate';
 import { getPredictionSavedIso, formatTimeHH24 } from '../utils/predictionTime';
+import { formatInsightUserLabel } from '../utils/insightQuestions';
 import * as XLSX from 'xlsx';
 
 function formatMatchTime(time) {
@@ -206,6 +207,7 @@ export default function Admin() {
   const [approvingQid, setApprovingQid] = useState(null);
   const [rejectingQid, setRejectingQid] = useState(null);
   const [removingQid, setRemovingQid] = useState(null);
+  const [togglingAnswersQid, setTogglingAnswersQid] = useState(null);
   const [answerModalQuestion, setAnswerModalQuestion] = useState(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [correctAnswerInput, setCorrectAnswerInput] = useState('');
@@ -220,8 +222,22 @@ export default function Admin() {
   });
   const [pointsExportTo, setPointsExportTo] = useState(() => getAppTodayDate());
   const [pointsExportLoading, setPointsExportLoading] = useState(false);
-
+  /** { match } when the send-notification modal is open */
+  const [matchNotifyModal, setMatchNotifyModal] = useState(null);
+  const [matchNotifyUserIds, setMatchNotifyUserIds] = useState([]);
+  const [matchNotifyTitle, setMatchNotifyTitle] = useState('');
+  const [matchNotifyBody, setMatchNotifyBody] = useState('');
+  const [matchNotifySending, setMatchNotifySending] = useState(false);
+  /** When set, a single-user immediate send is in progress (FCM to that uid only). */
   const todayCal = getAppTodayDate();
+
+  const matchNotifyEligibleUsers = useMemo(
+    () =>
+      allUsers
+        .filter((u) => u.id !== user?.uid && u.isAdmin !== true && u.isAdmin !== 'true')
+        .sort((a, b) => (a.username || a.email || '').localeCompare(b.username || b.email || '', undefined, { sensitivity: 'base' })),
+    [allUsers, user?.uid]
+  );
 
   const openParticipantsModal = async (match) => {
     if (!match?.id) return;
@@ -401,6 +417,71 @@ export default function Admin() {
 
   useAutoDismiss(message, setMessage);
 
+  const setMatchNotifyUserChecked = (rawId, checked) => {
+    const uid = rawId != null ? String(rawId).trim() : '';
+    if (!uid) return;
+    setMatchNotifyUserIds((prev) => {
+      const has = prev.some((x) => String(x) === uid);
+      if (checked && !has) return [...prev, uid];
+      if (!checked && has) return prev.filter((x) => String(x) !== uid);
+      return prev;
+    });
+  };
+
+  const openMatchNotifyModal = (m) => {
+    if (!m?.id) return;
+    setMatchNotifyModal({ match: m });
+    setMatchNotifyTitle('');
+    setMatchNotifyBody('');
+    setMatchNotifyUserIds([]);
+  };
+
+  const handleSendMatchNotifications = async () => {
+    const mid = matchNotifyModal?.match?.id;
+    if (!mid) {
+      setMessage('No match selected.');
+      return;
+    }
+    const selectedIds = [...new Set(matchNotifyUserIds)]
+      .map((id) => (typeof id === 'string' ? id.trim() : String(id || '').trim()))
+      .filter(Boolean);
+    if (selectedIds.length === 0) {
+      setMessage('Tick at least one user to send only to those users.');
+      return;
+    }
+    setMatchNotifySending(true);
+    try {
+      const title = matchNotifyTitle.trim() || undefined;
+      const body = matchNotifyBody.trim() || undefined;
+      const matchId = String(mid);
+
+      if (selectedIds.length === 1) {
+        await callFunction('sendNotificationToUser', {
+          userId: selectedIds[0],
+          title,
+          body,
+          matchId,
+        });
+        setMessage('Push sent only to the one selected user.');
+        setMatchNotifyModal(null);
+      } else {
+        const result = await callFunction('sendNotificationToUsers', {
+          userIds: selectedIds,
+          title,
+          body,
+          matchId,
+        });
+        const sent = result?.data?.sent;
+        setMessage(typeof sent === 'number' ? `Push sent only to ${sent} selected user(s).` : 'Notification request completed.');
+        setMatchNotifyModal(null);
+      }
+    } catch (err) {
+      console.error('send match notifications', err);
+      setMessage(err?.message || err?.code || 'Failed to send notifications.');
+    }
+    setMatchNotifySending(false);
+  };
+
   /** When requiredApprovals=2, need 1 (50%). When 4, need 2. Formula: ceil(required * 0.5), min 1. */
   const getMinApprovalsToShow = (req) => {
     const r = Math.max(1, parseInt(req, 10) || 1);
@@ -530,6 +611,34 @@ export default function Admin() {
       setMessage('Error removing: ' + (err.message || ''));
     }
     setRemovingQid(null);
+  };
+
+  const handleToggleAnswersDisabled = async (q, nextDisabled) => {
+    if (!q?.id) return;
+    setTogglingAnswersQid(q.id);
+    try {
+      await updateDoc(doc(db, 'cricket_questions', q.id), {
+        answersDisabled: nextDisabled,
+        answersDisabledAt: nextDisabled ? new Date().toISOString() : deleteField(),
+        answersDisabledBy: nextDisabled ? user.uid : deleteField(),
+      });
+      setMessage(nextDisabled ? 'Answers disabled for this question.' : 'Answers enabled again.');
+      setQuestionsAwaitingAnswer(prev =>
+        prev.map(p =>
+          p.id === q.id
+            ? {
+                ...p,
+                answersDisabled: nextDisabled,
+                answersDisabledAt: nextDisabled ? new Date().toISOString() : null,
+                answersDisabledBy: nextDisabled ? user.uid : null,
+              }
+            : p
+        )
+      );
+    } catch (err) {
+      setMessage('Error updating question: ' + (err.message || ''));
+    }
+    setTogglingAnswersQid(null);
   };
 
   const handleAddTeam = async (e) => {
@@ -2259,6 +2368,15 @@ export default function Admin() {
                         >
                           👥
                         </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline btn-icon-only"
+                          onClick={() => openMatchNotifyModal(m)}
+                          title="Send push notification for this match"
+                          aria-label="Send match notification"
+                        >
+                          🔔
+                        </button>
                         {(m.date || '') <= todayCal && (
                           <button
                             type="button"
@@ -2302,6 +2420,12 @@ export default function Admin() {
                                           {(q.options || []).length > 0 && (
                                             <p className="muted" style={{ margin: '0.25rem 0 0 0' }}>Options: {q.options.join(', ')}</p>
                                           )}
+                                          <p className="muted" style={{ margin: '0.35rem 0 0 0', fontSize: '0.9em' }}>
+                                            Raised by: <strong>{formatInsightUserLabel(allUsers, q.createdBy)}</strong>
+                                            {qApprovedBy.length > 0 && (
+                                              <> · Approved by: {qApprovedBy.map((uid) => formatInsightUserLabel(allUsers, uid)).join(', ')}</>
+                                            )}
+                                          </p>
                                         </div>
                                         <div className="insight-pending-actions">
                                           <button type="button" className="btn btn-sm btn-primary btn-icon-only" onClick={() => handleApproveQuestion(q)} disabled={approvingQid === q.id || alreadyApproved} title={alreadyApproved ? 'You already approved' : approvingQid === q.id ? 'Approving...' : 'Approve'} aria-label="Approve">
@@ -2327,7 +2451,9 @@ export default function Admin() {
                                     <p className="muted" style={{ marginBottom: '0.5rem' }}>Mark the match as completed first, then you can submit the correct answer.</p>
                                   )}
                                   <ul className="rules-list">
-                                    {matchAwaiting.map(q => (
+                                    {matchAwaiting.map(q => {
+                                      const ab = Array.isArray(q.approvedBy) ? q.approvedBy : [];
+                                      return (
                                       <li key={q.id} className="insight-pending-item">
                                         <div className="insight-pending-content">
                                           <strong>{q.question}</strong>
@@ -2335,8 +2461,28 @@ export default function Admin() {
                                           {(q.options || []).length > 0 && (
                                             <p className="muted" style={{ margin: '0.25rem 0 0 0' }}>Options: {q.options.join(', ')}</p>
                                           )}
+                                          <p className="muted" style={{ margin: '0.35rem 0 0 0', fontSize: '0.9em' }}>
+                                            Raised by: <strong>{formatInsightUserLabel(allUsers, q.createdBy)}</strong>
+                                            {ab.length > 0 && (
+                                              <> · Approved by: {ab.map((uid) => formatInsightUserLabel(allUsers, uid)).join(', ')}</>
+                                            )}
+                                          </p>
+                                          {q.answersDisabled === true && (
+                                            <p className="muted" style={{ margin: '0.2rem 0 0 0' }}>User answers are disabled for this question.</p>
+                                          )}
                                         </div>
                                         <div className="insight-pending-actions">
+                                          {(userProfile?.isAdmin === true || userProfile?.isAdmin === 'true') && (
+                                            <button
+                                              type="button"
+                                              className="btn btn-sm btn-secondary"
+                                              onClick={() => handleToggleAnswersDisabled(q, !q.answersDisabled)}
+                                              disabled={togglingAnswersQid === q.id}
+                                              title={q.answersDisabled ? 'Allow users to answer' : 'Stop users from answering'}
+                                            >
+                                              {togglingAnswersQid === q.id ? '…' : q.answersDisabled ? 'Enable answers' : 'Disable answers'}
+                                            </button>
+                                          )}
                                           <button
                                             type="button"
                                             className="btn btn-sm btn-primary btn-icon-only"
@@ -2352,7 +2498,8 @@ export default function Admin() {
                                           </button>
                                         </div>
                                       </li>
-                                    ))}
+                                    );
+                                    })}
                                   </ul>
                                 </div>
                               )}
@@ -2447,6 +2594,137 @@ export default function Admin() {
                       })()}
                     </>
                   )}
+                </div>
+              </div>
+            )}
+            {matchNotifyModal && (
+              <div
+                className="modal-overlay"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="match-notify-modal-title"
+                onClick={() => !matchNotifySending && setMatchNotifyModal(null)}
+              >
+                <div className="match-notify-modal" onClick={(e) => e.stopPropagation()}>
+                  <div className="modal-content">
+                    <div className="modal-header">
+                      <h3 id="match-notify-modal-title">
+                        Send notification — {getTeamCode(matchNotifyModal.match?.team1, teams)} vs {getTeamCode(matchNotifyModal.match?.team2, teams)}
+                      </h3>
+                      <button
+                        type="button"
+                        className="modal-close"
+                        onClick={() => !matchNotifySending && setMatchNotifyModal(null)}
+                        aria-label="Close"
+                      >
+                        &times;
+                      </button>
+                    </div>
+                    <p className="muted" style={{ marginTop: 0 }}>
+                      {(matchNotifyModal.match?.date || '')} · {formatMatchTime(matchNotifyModal.match?.time || matchNotifyModal.match?.slot)}
+                      {' · '}
+                      Only users with a ticked checkbox receive the push. Tap Send to selected users—nothing is queued.
+                      Tapping the notification opens this match on the dashboard.
+                    </p>
+                    <div className="form-group">
+                      <label htmlFor="match-notify-title">Title</label>
+                      <input
+                        id="match-notify-title"
+                        type="text"
+                        value={matchNotifyTitle}
+                        onChange={(e) => setMatchNotifyTitle(e.target.value)}
+                        placeholder="e.g. Reminder: predict before cutoff"
+                        maxLength={120}
+                        style={{ width: '100%', boxSizing: 'border-box', padding: '0.5rem 0.75rem', borderRadius: 8, border: '1px solid var(--border)' }}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label htmlFor="match-notify-body">Message</label>
+                      <textarea
+                        id="match-notify-body"
+                        value={matchNotifyBody}
+                        onChange={(e) => setMatchNotifyBody(e.target.value)}
+                        placeholder="Short message body…"
+                        rows={3}
+                        maxLength={500}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <span id="match-notify-users-label">Recipients (checked only)</span>
+                      <p className="muted" style={{ margin: '0.25rem 0 0.5rem', fontSize: '0.9rem' }}>
+                        Tick who should get this push, then use the button below. Only ticked users are notified—never everyone at once unless you choose Select all.
+                      </p>
+                      <div className="notify-quick-select" style={{ marginTop: '0.5rem' }}>
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          onClick={() =>
+                            setMatchNotifyUserIds(
+                              matchNotifyEligibleUsers.map((u) => String(u.id ?? u.uid ?? '').trim()).filter(Boolean)
+                            )
+                          }
+                          disabled={matchNotifySending}
+                        >
+                          Select all
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          onClick={() => setMatchNotifyUserIds([])}
+                          disabled={matchNotifySending}
+                        >
+                          Clear
+                        </button>
+                      </div>
+                      <p className="muted" style={{ marginTop: '0.35rem', fontSize: '0.9rem' }}>
+                        {matchNotifyUserIds.length} user(s) will receive the push · {matchNotifyEligibleUsers.length} listed
+                      </p>
+                      <ul className="notify-user-list" aria-labelledby="match-notify-users-label" role="list">
+                        {matchNotifyEligibleUsers.map((u) => {
+                          const rowId = String(u.id ?? u.uid ?? '').trim();
+                          if (!rowId) return null;
+                          const isChecked = matchNotifyUserIds.some((x) => String(x) === rowId);
+                          return (
+                          <li key={rowId} className="match-notify-user-row">
+                            <label className="match-notify-user-label" htmlFor={`match-notify-cb-${rowId}`}>
+                              <input
+                                id={`match-notify-cb-${rowId}`}
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={(e) => setMatchNotifyUserChecked(rowId, e.target.checked)}
+                                disabled={matchNotifySending}
+                              />
+                              <span>{toInitCap((u.username || u.email || 'User').toString().replace(/_/g, ' '))}</span>
+                              <span className="muted notify-user-email">{u.email || rowId}</span>
+                            </label>
+                          </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                    <div className="modal-actions">
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => !matchNotifySending && setMatchNotifyModal(null)}
+                        disabled={matchNotifySending}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={handleSendMatchNotifications}
+                        disabled={matchNotifySending || matchNotifyUserIds.length === 0}
+                      >
+                        {matchNotifySending
+                          ? 'Sending…'
+                          : matchNotifyUserIds.length === 1
+                            ? 'Send to 1 selected user'
+                            : `Send to ${matchNotifyUserIds.length} selected users`}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}

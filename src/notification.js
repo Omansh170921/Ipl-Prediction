@@ -21,7 +21,8 @@ export function playIplNotificationSound() {
 
 /**
  * When the app is in the foreground, FCM delivers messages here — play the IPL chime.
- * (Background pushes use the OS notification sound + vibrate from the service worker.)
+ * (Background: firebase-messaging-sw.js plays /sounds/ipl-notification.wav and sets silent on the
+ * system notification so the default beep is not doubled.)
  */
 export function registerIplNotificationSoundHandlers() {
   if (typeof window === "undefined") return () => {};

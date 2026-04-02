@@ -106,17 +106,19 @@ exports.scheduledPredictionReminder = onSchedule({
       const title = 'IPL Prediction Reminder';
       const body = `Match #${match.matchNumber || match.id}: ${team1} vs ${team2}. Predict before ${(match.thresholdTime || match.time || '')}. 15 minutes left!`;
 
-      const payload = {
-        notification: { title, body },
-        data: { matchId: match.id, type: 'prediction_reminder' },
-        android: { priority: 'high' },
-        apns: { payload: { aps: { sound: 'default' } } },
-      };
-
       for (let i = 0; i < tokensToNotify.length; i += BATCH_SIZE) {
         const batch = tokensToNotify.slice(i, i + BATCH_SIZE);
         try {
-          await messaging.sendEachForMulticast({ ...payload, tokens: batch });
+          await messaging.sendEachForMulticast({
+            tokens: batch,
+            data: fcmDataStrings({
+              title,
+              body,
+              matchId: match.id,
+              type: 'prediction_reminder',
+            }),
+            android: { priority: 'high' },
+          });
         } catch (err) {
           console.error('FCM send error for match', match.id, err);
         }
@@ -307,13 +309,16 @@ exports.notifyPointsCalculated = functions.https.onCall(async (data, context) =>
     const body = `${matchLabel}. Winner: ${winner}. Points earned: ${earnedStr}. Total points: ${total}`;
 
     try {
-      await messaging.send({
-        token,
-        notification: { title, body },
-        data: { matchId, type: 'points_calculated', winner, url: '/dashboard?section=leaderboard' },
-        android: { priority: 'high' },
-        apns: { payload: { aps: { sound: 'default' } } },
-      });
+      await messaging.send(
+        buildWebPushMessage(token, {
+          title,
+          body,
+          matchId,
+          type: 'points_calculated',
+          winner,
+          url: '/dashboard?section=leaderboard',
+        })
+      );
       sent++;
     } catch (err) {
       const code = err.code || err.errorInfo?.code || '';
@@ -332,6 +337,42 @@ exports.notifyPointsCalculated = functions.https.onCall(async (data, context) =>
   return { sent };
 });
 
+/** FCM data payload must use string values. Optional matchId adds deep link to Dashboard match card. */
+function buildAdminNotificationData(matchId) {
+  const matchIdStr = matchId != null && String(matchId).trim() ? String(matchId).trim() : '';
+  if (!matchIdStr) {
+    return { type: 'admin_notification' };
+  }
+  return {
+    type: 'admin_match_notification',
+    matchId: matchIdStr,
+    url: `/dashboard?section=matches&focusMatch=${encodeURIComponent(matchIdStr)}`,
+  };
+}
+
+/** All FCM data values must be strings (Firebase requirement). */
+function fcmDataStrings(obj) {
+  const out = {};
+  if (!obj || typeof obj !== 'object') return out;
+  for (const [k, v] of Object.entries(obj)) {
+    if (v == null) continue;
+    out[k] = typeof v === 'string' ? v : String(v);
+  }
+  return out;
+}
+
+/**
+ * Web/PWA: send data-only messages (no top-level `notification` key).
+ * Otherwise the browser may show one notification from FCM and a second from firebase-messaging-sw.js.
+ */
+function buildWebPushMessage(token, fields) {
+  return {
+    token,
+    data: fcmDataStrings(fields),
+    android: { priority: 'high' },
+  };
+}
+
 /**
  * Send push notification to an individual user. Admin only.
  */
@@ -346,7 +387,7 @@ exports.sendNotificationToUser = functions.https.onCall(async (data, context) =>
     throw new functions.https.HttpsError('permission-denied', 'Admin only.');
   }
 
-  const { userId, title, body } = data || {};
+  const { userId, title, body, matchId } = data || {};
   if (!userId || typeof userId !== 'string') {
     throw new functions.https.HttpsError('invalid-argument', 'userId is required.');
   }
@@ -363,13 +404,13 @@ exports.sendNotificationToUser = functions.https.onCall(async (data, context) =>
   }
 
   try {
-    await admin.messaging().send({
-      token,
-      notification: { title: trimmedTitle, body: trimmedBody },
-      data: { type: 'admin_notification' },
-      android: { priority: 'high' },
-      apns: { payload: { aps: { sound: 'default' } } },
-    });
+    await admin.messaging().send(
+      buildWebPushMessage(token, {
+        title: trimmedTitle,
+        body: trimmedBody,
+        ...buildAdminNotificationData(matchId),
+      })
+    );
     return { sent: true };
   } catch (err) {
     const code = err.code || err.errorInfo?.code || '';
@@ -400,13 +441,17 @@ exports.sendNotificationToUsers = functions.https.onCall(async (data, context) =
     throw new functions.https.HttpsError('permission-denied', 'Admin only.');
   }
 
-  const { userIds, title, body } = data || {};
-  const ids = Array.isArray(userIds) ? userIds.filter(id => typeof id === 'string' && id.trim()) : [];
+  const { userIds, title, body, matchId } = data || {};
+  if (!Array.isArray(userIds)) {
+    throw new functions.https.HttpsError('invalid-argument', 'userIds must be a non-empty array of user id strings.');
+  }
+  const ids = [...new Set(userIds.map((id) => (id != null ? String(id).trim() : '')).filter(Boolean))];
   if (ids.length === 0) {
     throw new functions.https.HttpsError('invalid-argument', 'userIds array (at least one user) is required.');
   }
   const trimmedTitle = (title != null ? String(title) : '').trim() || 'IPL Prediction';
   const trimmedBody = (body != null ? String(body) : '').trim() || 'You have an update.';
+  const notificationData = buildAdminNotificationData(matchId);
 
   const usersSnap = await db.collection('users').get();
   const userMap = new Map(usersSnap.docs.map(d => [d.id, { ...d.data(), id: d.id }]));
@@ -420,13 +465,13 @@ exports.sendNotificationToUsers = functions.https.onCall(async (data, context) =
     if (!token) continue;
 
     try {
-      await messaging.send({
-        token,
-        notification: { title: trimmedTitle, body: trimmedBody },
-        data: { type: 'admin_notification' },
-        android: { priority: 'high' },
-        apns: { payload: { aps: { sound: 'default' } } },
-      });
+      await messaging.send(
+        buildWebPushMessage(token, {
+          title: trimmedTitle,
+          body: trimmedBody,
+          ...notificationData,
+        })
+      );
       sent++;
     } catch (err) {
       const code = err.code || err.errorInfo?.code || '';
@@ -444,3 +489,160 @@ exports.sendNotificationToUsers = functions.https.onCall(async (data, context) =
 
   return { sent };
 });
+
+/**
+ * Collect UIDs that should receive "new insight question to approve" pushes:
+ * all admins, settings/cricketInsights.insightApproverIds, and insight_approvers doc ids.
+ */
+async function collectInsightApproverRecipientIds(db) {
+  const ids = new Set();
+  const [usersSnap, ciSnap, approversSnap] = await Promise.all([
+    db.collection('users').get(),
+    db.doc('settings/cricketInsights').get(),
+    db.collection('insight_approvers').get(),
+  ]);
+  usersSnap.docs.forEach((d) => {
+    const data = d.data();
+    if (data.isAdmin === true || data.isAdmin === 'true') ids.add(d.id);
+  });
+  if (ciSnap.exists) {
+    const arr = ciSnap.data().insightApproverIds;
+    if (Array.isArray(arr)) {
+      arr.forEach((x) => {
+        const s = x != null ? String(x).trim() : '';
+        if (s) ids.add(s);
+      });
+    }
+  }
+  approversSnap.docs.forEach((d) => ids.add(d.id));
+  return [...ids];
+}
+
+/**
+ * New Cricket Insight question (pending) → push to admins + insight approvers (not the submitter).
+ */
+exports.onCricketQuestionCreated = functions.firestore
+  .document('cricket_questions/{questionId}')
+  .onCreate(async (snap, context) => {
+    const db = admin.firestore();
+    const messaging = admin.messaging();
+    const questionId = context.params.questionId;
+    const data = snap.data() || {};
+    if ((data.status || '').toLowerCase() !== 'pending') return null;
+    if (data.approved === true || data.approved === 'true') return null;
+
+    const createdBy = (data.createdBy || '').toString().trim();
+    const matchId = (data.matchId || '').toString().trim();
+
+    let recipientIds;
+    try {
+      recipientIds = await collectInsightApproverRecipientIds(db);
+    } catch (err) {
+      console.error('onCricketQuestionCreated: collectInsightApproverRecipientIds', err);
+      return null;
+    }
+    const filtered = recipientIds.filter((uid) => uid && uid !== createdBy);
+
+    const title = 'Insight approval request';
+    const body = 'please read question and approve';
+
+    let sent = 0;
+    for (const uid of filtered) {
+      const userDoc = await db.doc(`users/${uid}`).get();
+      if (!userDoc.exists) continue;
+      const token = (userDoc.data().fcmToken || '').trim();
+      if (!token) continue;
+      try {
+        await messaging.send(
+          buildWebPushMessage(token, {
+            title,
+            body,
+            type: 'insight_question_pending',
+            questionId: String(questionId),
+            matchId: matchId || '',
+            url: '/insight-approval',
+          })
+        );
+        sent++;
+      } catch (err) {
+        const code = err.code || err.errorInfo?.code || '';
+        if (code === 'messaging/invalid-registration-token' || code === 'messaging/registration-token-not-registered') {
+          try {
+            await db.doc(`users/${uid}`).update({ fcmToken: admin.firestore.FieldValue.delete() });
+          } catch (delErr) {
+            console.warn('FCM token cleanup', uid, delErr);
+          }
+        } else {
+          console.warn('onCricketQuestionCreated FCM', uid, code || err.message);
+        }
+      }
+    }
+    console.log(`onCricketQuestionCreated: notified ${sent} approvers for ${questionId}`);
+    return null;
+  });
+
+/**
+ * Insight question fully approved → push to all non-admin users with FCM token.
+ */
+exports.onCricketQuestionApproved = functions.firestore
+  .document('cricket_questions/{questionId}')
+  .onUpdate(async (change, context) => {
+    const db = admin.firestore();
+    const messaging = admin.messaging();
+    const before = change.before.data() || {};
+    const after = change.after.data() || {};
+    const wasApproved = before.approved === true || before.approved === 'true';
+    const nowApproved = after.approved === true || after.approved === 'true';
+    if (wasApproved || !nowApproved) return null;
+
+    const questionId = context.params.questionId;
+    const matchId = (after.matchId || '').toString().trim();
+    const qText = (after.question || '').toString().trim();
+    const preview = qText.length > 80 ? `${qText.slice(0, 80)}…` : qText;
+
+    const title = 'New Cricket Insight';
+    const body = preview
+      ? `Answer now: ${preview}`
+      : 'A new Cricket Insight question is ready. Open the app to answer.';
+
+    const url = matchId
+      ? `/dashboard?section=matches&focusMatch=${encodeURIComponent(matchId)}`
+      : '/dashboard?section=matches';
+
+    const usersSnap = await db.collection('users').get();
+    let sent = 0;
+    for (const docSnap of usersSnap.docs) {
+      const uid = docSnap.id;
+      const data = docSnap.data();
+      if (data.isAdmin === true || data.isAdmin === 'true') continue;
+      const token = (data.fcmToken || '').trim();
+      if (!token) continue;
+
+      try {
+        await messaging.send(
+          buildWebPushMessage(token, {
+            title,
+            body,
+            type: 'insight_question_approved',
+            questionId: String(questionId),
+            matchId: matchId || '',
+            url,
+          })
+        );
+        sent++;
+      } catch (err) {
+        const code = err.code || err.errorInfo?.code || '';
+        if (code === 'messaging/invalid-registration-token' || code === 'messaging/registration-token-not-registered') {
+          try {
+            await db.doc(`users/${uid}`).update({ fcmToken: admin.firestore.FieldValue.delete() });
+          } catch (delErr) {
+            console.warn('FCM token cleanup', uid, delErr);
+          }
+        } else {
+          console.warn('onCricketQuestionApproved FCM', uid, code || err.message);
+        }
+      }
+    }
+    console.log(`onCricketQuestionApproved: broadcast to ${sent} users for ${questionId}`);
+    return null;
+  });

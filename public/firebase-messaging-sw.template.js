@@ -13,9 +13,51 @@ firebase.initializeApp({
 });
 
 const messaging = firebase.messaging();
+
+/** Same asset as src/notification.js — play in SW so background pushes use IPL tone, not the OS default. */
+const IPL_SOUND_URL = '/sounds/ipl-notification.wav';
+
+function tryPlayIplSound() {
+  const AudioCtx = self.AudioContext || self.webkitAudioContext;
+  if (!AudioCtx) return Promise.resolve(false);
+  const ctx = new AudioCtx();
+  return ctx
+    .resume()
+    .then(() => fetch(IPL_SOUND_URL))
+    .then((r) => {
+      if (!r.ok) throw new Error('sound fetch');
+      return r.arrayBuffer();
+    })
+    .then((buf) => ctx.decodeAudioData(buf.slice(0)))
+    .then((audioBuffer) => {
+      const src = ctx.createBufferSource();
+      src.buffer = audioBuffer;
+      src.connect(ctx.destination);
+      src.start(0);
+      return true;
+    })
+    .catch(() => false);
+}
+
+/**
+ * Show notification: play IPL chime when possible and set silent=true to avoid double beep with OS default.
+ */
+function showNotificationWithIplSound(title, body, baseOptions) {
+  const t = title || 'IPL Prediction';
+  return tryPlayIplSound().then((played) =>
+    self.registration.showNotification(t, {
+      ...baseOptions,
+      silent: !!played,
+    })
+  );
+}
+
 messaging.onBackgroundMessage((payload) => {
-  const { title, body } = payload.notification || {};
   const data = payload.data || {};
+  const n = payload.notification || {};
+  // Prefer data.title/body (data-only FCM avoids duplicate notifications with SW showNotification).
+  const title = data.title || n.title || 'IPL Prediction';
+  const body = data.body || n.body || '';
   const url = (data.url || '/dashboard').startsWith('/') ? (data.url || '/dashboard') : '/dashboard';
   const tag = ['fcm', data.type || '', data.matchId || ''].filter(Boolean).join('-') || 'ipl-fcm';
   const options = {
@@ -23,12 +65,11 @@ messaging.onBackgroundMessage((payload) => {
     icon: '/favicon.png',
     badge: '/favicon.png',
     vibrate: [180, 100, 180],
-    silent: false,
     tag,
     renotify: true,
     data: { url },
   };
-  self.registration.showNotification(title || 'IPL Prediction', options);
+  return showNotificationWithIplSound(title, body, options);
 });
 
 self.addEventListener('notificationclick', (event) => {

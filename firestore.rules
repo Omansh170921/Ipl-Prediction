@@ -67,18 +67,22 @@ service cloud.firestore {
     }
 
     // Cricket Insights: questions (users create; admin/approvers can approve; only admin can delete)
+    // Only admins may change answersDisabled / answersDisabledAt / answersDisabledBy.
     match /cricket_questions/{docId} {
       allow read: if request.auth != null;
       allow create: if request.auth != null;
       allow update: if isAdmin() ||
-        (request.auth != null && exists(/databases/$(database)/documents/insight_approvers/$(request.auth.uid)));
+        (request.auth != null && exists(/databases/$(database)/documents/insight_approvers/$(request.auth.uid)) &&
+          !request.resource.data.diff(resource.data).changedKeys().hasAny(['answersDisabled', 'answersDisabledAt', 'answersDisabledBy']));
       allow delete: if isAdmin();
     }
 
-    // Cricket Insights: answers (users answer once per question)
+    // Cricket Insights: answers (users answer once per question; not when question is closed by admin)
     match /cricket_answers/{docId} {
       allow read: if request.auth != null;
-      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid &&
+        exists(/databases/$(database)/documents/cricket_questions/$(request.resource.data.questionId)) &&
+        get(/databases/$(database)/documents/cricket_questions/$(request.resource.data.questionId)).data.answersDisabled != true;
       allow update, delete: if request.auth != null && resource.data.userId == request.auth.uid;
     }
   }

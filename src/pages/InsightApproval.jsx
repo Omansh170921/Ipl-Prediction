@@ -9,6 +9,7 @@ import {
   doc,
   updateDoc,
   deleteDoc,
+  deleteField,
   query,
   where,
   increment,
@@ -18,6 +19,7 @@ import { db } from '../firebase/config';
 import Sidebar from '../components/Sidebar';
 import { toInitCap } from '../utils/format';
 import { getAppTodayDate } from '../utils/calendarDate';
+import { formatInsightUserLabel } from '../utils/insightQuestions';
 
 function formatMatchTime(time) {
   if (!time) return 'TBD';
@@ -49,6 +51,8 @@ export default function InsightApproval() {
   const [approvingQid, setApprovingQid] = useState(null);
   const [rejectingQid, setRejectingQid] = useState(null);
   const [removingQid, setRemovingQid] = useState(null);
+  const [togglingAnswersQid, setTogglingAnswersQid] = useState(null);
+  const [insightUsers, setInsightUsers] = useState([]);
   const [answerModalQuestion, setAnswerModalQuestion] = useState(null);
   const [correctAnswerInput, setCorrectAnswerInput] = useState('');
   const [submittingAnswer, setSubmittingAnswer] = useState(false);
@@ -88,7 +92,7 @@ export default function InsightApproval() {
         }
         setAuthorized(true);
 
-        const [teamsSnap, matchesSnap, pendingSnap, awaitingSnap] = await Promise.all([
+        const [teamsSnap, matchesSnap, pendingSnap, awaitingSnap, usersSnap] = await Promise.all([
           getDocs(collection(db, 'teams')),
           getDocs(collection(db, 'matches')),
           getDocs(query(
@@ -101,7 +105,9 @@ export default function InsightApproval() {
             where('approved', '==', true),
             where('correctAnswer', '==', null)
           )),
+          getDocs(collection(db, 'users')),
         ]);
+        setInsightUsers(usersSnap.docs.map(d => ({ id: d.id, ...d.data() })));
         const today = getAppTodayDate();
         setTeams(teamsSnap.docs.map(d => ({ id: d.id, ...d.data() })));
         const allMatches = matchesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -258,6 +264,36 @@ export default function InsightApproval() {
     setRemovingQid(null);
   };
 
+  const handleToggleAnswersDisabled = async (q, nextDisabled) => {
+    if (!q?.id) return;
+    const isAdminUser = userProfile?.isAdmin === true || userProfile?.isAdmin === 'true';
+    if (!isAdminUser) return;
+    setTogglingAnswersQid(q.id);
+    try {
+      await updateDoc(doc(db, 'cricket_questions', q.id), {
+        answersDisabled: nextDisabled,
+        answersDisabledAt: nextDisabled ? new Date().toISOString() : deleteField(),
+        answersDisabledBy: nextDisabled ? user.uid : deleteField(),
+      });
+      setMessage(nextDisabled ? 'Answers disabled for this question.' : 'Answers enabled again.');
+      setQuestionsAwaitingAnswer(prev =>
+        prev.map(p =>
+          p.id === q.id
+            ? {
+                ...p,
+                answersDisabled: nextDisabled,
+                answersDisabledAt: nextDisabled ? new Date().toISOString() : null,
+                answersDisabledBy: nextDisabled ? user.uid : null,
+              }
+            : p
+        )
+      );
+    } catch (err) {
+      setMessage('Error updating question: ' + (err.message || ''));
+    }
+    setTogglingAnswersQid(null);
+  };
+
   if (!user) {
     navigate('/login');
     return null;
@@ -386,6 +422,12 @@ export default function InsightApproval() {
                                     {(q.options || []).length > 0 && (
                                       <p className="muted" style={{ margin: '0.25rem 0 0 0' }}>Options: {q.options.join(', ')}</p>
                                     )}
+                                    <p className="muted" style={{ margin: '0.35rem 0 0 0', fontSize: '0.9em' }}>
+                                      Raised by: <strong>{formatInsightUserLabel(insightUsers, q.createdBy)}</strong>
+                                      {approvedBy.length > 0 && (
+                                        <> · Approved by: {approvedBy.map((uid) => formatInsightUserLabel(insightUsers, uid)).join(', ')}</>
+                                      )}
+                                    </p>
                                   </div>
                                   <div className="insight-pending-actions">
                                     <button type="button" className="btn btn-sm btn-primary btn-icon-only" onClick={() => handleApproveQuestion(q)} disabled={approvingQid === q.id || alreadyApproved} title={alreadyApproved ? 'You already approved' : approvingQid === q.id ? 'Approving...' : 'Approve'} aria-label="Approve">
@@ -413,7 +455,10 @@ export default function InsightApproval() {
                               <p className="muted" style={{ marginBottom: '0.5rem' }}>Match must be completed first.</p>
                             )}
                             <ul className="rules-list">
-                              {matchAwaiting.map(q => (
+                              {matchAwaiting.map(q => {
+                                const ab = Array.isArray(q.approvedBy) ? q.approvedBy : [];
+                                const isAdminUser = userProfile?.isAdmin === true || userProfile?.isAdmin === 'true';
+                                return (
                                 <li key={q.id} className="insight-pending-item">
                                   <div className="insight-pending-content">
                                     <strong>{q.question}</strong>
@@ -421,8 +466,28 @@ export default function InsightApproval() {
                                     {(q.options || []).length > 0 && (
                                       <p className="muted" style={{ margin: '0.25rem 0 0 0' }}>Options: {q.options.join(', ')}</p>
                                     )}
+                                    <p className="muted" style={{ margin: '0.35rem 0 0 0', fontSize: '0.9em' }}>
+                                      Raised by: <strong>{formatInsightUserLabel(insightUsers, q.createdBy)}</strong>
+                                      {ab.length > 0 && (
+                                        <> · Approved by: {ab.map((uid) => formatInsightUserLabel(insightUsers, uid)).join(', ')}</>
+                                      )}
+                                    </p>
+                                    {q.answersDisabled === true && (
+                                      <p className="muted" style={{ margin: '0.2rem 0 0 0' }}>User answers are disabled for this question.</p>
+                                    )}
                                   </div>
                                   <div className="insight-pending-actions">
+                                    {isAdminUser && (
+                                      <button
+                                        type="button"
+                                        className="btn btn-sm btn-secondary"
+                                        onClick={() => handleToggleAnswersDisabled(q, !q.answersDisabled)}
+                                        disabled={togglingAnswersQid === q.id}
+                                        title={q.answersDisabled ? 'Allow users to answer' : 'Stop users from answering'}
+                                      >
+                                        {togglingAnswersQid === q.id ? '…' : q.answersDisabled ? 'Enable answers' : 'Disable answers'}
+                                      </button>
+                                    )}
                                     <button
                                       type="button"
                                       className="btn btn-sm btn-primary btn-icon-only"
@@ -440,7 +505,8 @@ export default function InsightApproval() {
                                     )}
                                   </div>
                                 </li>
-                              ))}
+                              );
+                              })}
                             </ul>
                           </div>
                         )}

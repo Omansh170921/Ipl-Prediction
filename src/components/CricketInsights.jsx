@@ -3,6 +3,7 @@ import { collection, addDoc, getDocs, query, where, deleteDoc, doc } from 'fireb
 import { db } from '../firebase/config';
 import { useAuth } from '../context/AuthContext';
 import { getAppTodayDate } from '../utils/calendarDate';
+import { insightQuestionCountsTowardLimits, isInsightQuestionAnswerableInUi } from '../utils/insightQuestions';
 
 const QUESTION_TYPES = [
   { value: 'yesno', label: 'Yes / No', options: ['Yes', 'No'] },
@@ -44,7 +45,11 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
         )),
         getDocs(query(collection(db, 'cricket_questions'), where('matchId', '==', matchId))),
       ]);
-      setQuestions(approvedSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setQuestions(
+        approvedSnap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(isInsightQuestionAnswerableInUi)
+      );
       setAllMatchQuestions(allSnap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (err) {
       console.error('Fetch questions error:', err);
@@ -118,12 +123,19 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
       setError('Please enter a question title.');
       return;
     }
-    const myCount = allMatchQuestions.filter(q => q.createdBy === user.uid).length;
-    if (myCount >= maxPerUser) {
-      setError(`You can only ask ${maxPerUser} question${maxPerUser > 1 ? 's' : ''} per match.`);
+    const myActive = allMatchQuestions.filter(
+      q => q.createdBy === user.uid && insightQuestionCountsTowardLimits(q)
+    );
+    if (myActive.length >= maxPerUser) {
+      setError(
+        maxPerUser <= 1
+          ? 'You already have an insight question for this match. If it was rejected, you can submit a new one.'
+          : `You can only ask ${maxPerUser} question${maxPerUser > 1 ? 's' : ''} per match.`
+      );
       return;
     }
-    if (allMatchQuestions.length >= maxPerMatch) {
+    const matchSlotsUsed = allMatchQuestions.filter(insightQuestionCountsTowardLimits).length;
+    if (matchSlotsUsed >= maxPerMatch) {
       setError(`Maximum ${maxPerMatch} questions per match reached.`);
       return;
     }
@@ -148,6 +160,7 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
         approvedBy: [],
         correctAnswer: null,
         status: 'pending',
+        answersDisabled: false,
       });
       setSuccess('Question submitted! It will appear here after admin approval.');
       setShowModal(false);
@@ -168,6 +181,10 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
     const answer = answerInputs[q.id];
     if (answer == null || String(answer).trim() === '') return;
     if (myAnswers[q.id]) return;
+    if (q.answersDisabled === true || !isInsightQuestionAnswerableInUi(q)) {
+      setError('Answers are closed for this question.');
+      return;
+    }
     if (!user) {
       setError('Please log in to submit an answer.');
       return;
@@ -225,8 +242,10 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
   const today = getAppTodayDate();
   const isTodayMatch = (matchDate || '') === today;
   const isMatchCompleted = (matchStatus || '').toLowerCase() === 'completed';
-  const myQuestionCount = allMatchQuestions.filter(q => q.createdBy === user?.uid).length;
-  const totalCount = allMatchQuestions.length;
+  const myQuestionCount = allMatchQuestions.filter(
+    q => q.createdBy === user?.uid && insightQuestionCountsTowardLimits(q)
+  ).length;
+  const totalCount = allMatchQuestions.filter(insightQuestionCountsTowardLimits).length;
   const canAskQuestion = user && isTodayMatch && !isMatchCompleted && myQuestionCount < maxPerUser && totalCount < maxPerMatch;
 
   return (
@@ -247,7 +266,13 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
               ? <p className="muted">Questions can only be asked for today&apos;s matches.</p>
               : totalCount >= maxPerMatch
                 ? <p className="muted">Maximum {maxPerMatch} questions per match reached.</p>
-                : myQuestionCount >= maxPerUser && <p className="muted">You can ask up to {maxPerUser} question{maxPerUser > 1 ? 's' : ''} per match.</p>
+                : myQuestionCount >= maxPerUser && (
+                  <p className="muted">
+                    {maxPerUser <= 1
+                      ? 'You already have an insight question for this match (pending or approved). If it was rejected, you can submit a new one.'
+                      : `You can ask up to ${maxPerUser} questions per match.`}
+                  </p>
+                )
         )
       )}
 
