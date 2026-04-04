@@ -2784,15 +2784,20 @@ button.stat-card.stat-card-clickable:hover {
 .leaderboard-header,
 .leaderboard-row {
   display: grid;
-  grid-template-columns: 60px 1fr 80px;
+  grid-template-columns: 52px 52px 1fr 80px;
   gap: 1rem;
   padding: 0.75rem 1rem;
   align-items: center;
 }
 
+.leaderboard-rank-last {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
 .leaderboard-table.leaderboard-with-wl .leaderboard-header,
 .leaderboard-table.leaderboard-with-wl .leaderboard-row {
-  grid-template-columns: 60px 1fr 80px 44px;
+  grid-template-columns: 52px 52px 1fr 80px 44px;
 }
 
 .leaderboard-wl-symbol {
@@ -3251,17 +3256,17 @@ button.stat-card.stat-card-clickable:hover {
 
   .leaderboard-header,
   .leaderboard-row {
-    grid-template-columns: 40px minmax(80px, 1fr) 70px;
+    grid-template-columns: 36px 36px minmax(80px, 1fr) 64px;
     gap: 0.5rem;
     padding: 0.65rem 0.75rem;
     font-size: 0.875rem;
-    min-width: 280px;
+    min-width: 300px;
   }
 
   .leaderboard-table.leaderboard-with-wl .leaderboard-header,
   .leaderboard-table.leaderboard-with-wl .leaderboard-row {
-    grid-template-columns: 40px minmax(80px, 1fr) 70px 36px;
-    min-width: 320px;
+    grid-template-columns: 36px 36px minmax(80px, 1fr) 64px 36px;
+    min-width: 340px;
   }
 
   .leaderboard-username-btn {

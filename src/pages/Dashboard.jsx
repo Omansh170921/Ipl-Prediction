@@ -45,6 +45,110 @@ function sortMatchesChronological(list) {
   });
 }
 
+/**
+ * Last completed match day strictly before the selected date (for “previous” rank).
+ * If no date is selected (“All dates”), the boundary is the final completed day, so “previous”
+ * means standings through the last match before that final day.
+ */
+function getPreviousMatchCutoffDate(allMatches, selectedDate) {
+  const completed = sortMatchesChronological(
+    (allMatches || []).filter(
+      (m) => (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim()
+    )
+  );
+  if (completed.length === 0) return '';
+  const endExclusive = selectedDate && String(selectedDate).trim()
+    ? String(selectedDate).trim()
+    : (completed[completed.length - 1].date || '').trim();
+  const before = completed.filter((m) => (m.date || '') < endExclusive);
+  if (before.length === 0) return '';
+  return (before[before.length - 1].date || '').trim();
+}
+
+function computeRankedMainLeaderboard(
+  allMatches,
+  users,
+  predsByMatch,
+  pointRules,
+  matchStartDate,
+  dateCutoff
+) {
+  let completedMatches = allMatches.filter(
+    (m) => (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim()
+  );
+  if (dateCutoff) {
+    completedMatches = completedMatches.filter((m) => (m.date || '') <= dateCutoff);
+  }
+  completedMatches = sortMatchesChronological(completedMatches);
+  const totals = calculateLeaderboard(completedMatches, users, predsByMatch, pointRules);
+  let sortedByPoints = users
+    .map((u) => ({
+      ...u,
+      points: totals[u.id] ?? 0,
+    }))
+    .sort((a, b) => {
+      const pb = b.points ?? 0;
+      const pa = a.points ?? 0;
+      if (pb !== pa) return pb - pa;
+      return compareLeaderboardUsers(a, b);
+    });
+  if (matchStartDate && sortedByPoints.length > 0) {
+    const bottomPoints = sortedByPoints[sortedByPoints.length - 1].points ?? 0;
+    sortedByPoints = sortedByPoints
+      .map((u) => {
+        const createdAtDate = (u.createdAt || '').toString().split('T')[0];
+        const isLateUser =
+          createdAtDate &&
+          createdAtDate >= matchStartDate &&
+          !isUserPredictionApproved(u);
+        return isLateUser ? { ...u, points: bottomPoints, isLateUser: true } : { ...u, isLateUser: false };
+      })
+      .sort((a, b) => {
+        const pb = b.points ?? 0;
+        const pa = a.points ?? 0;
+        if (pb !== pa) return pb - pa;
+        return compareLeaderboardUsers(a, b);
+      });
+  }
+  let rank = 1;
+  return sortedByPoints.map((u, i) => {
+    if (i > 0 && (sortedByPoints[i - 1].points ?? 0) > (u.points ?? 0)) rank += 1;
+    return { ...u, rank };
+  });
+}
+
+function computeInsightRanked(users, allMatches, dateCutoff) {
+  let insightMatches = allMatches;
+  if (dateCutoff) {
+    insightMatches = insightMatches.filter((m) => (m.date || '') <= dateCutoff);
+  }
+  const insightTotals = {};
+  users.forEach((u) => {
+    insightTotals[u.id] = 0;
+  });
+  insightMatches.forEach((m) => {
+    const ir = m.insightPointResults;
+    if (ir && typeof ir === 'object') {
+      Object.entries(ir).forEach(([uid, pts]) => {
+        insightTotals[uid] = (insightTotals[uid] || 0) + Number(pts || 0);
+      });
+    }
+  });
+  const sortedByInsight = [...users]
+    .map((u) => ({ ...u, insightPoints: insightTotals[u.id] ?? 0 }))
+    .sort((a, b) => {
+      const ib = b.insightPoints ?? 0;
+      const ia = a.insightPoints ?? 0;
+      if (ib !== ia) return ib - ia;
+      return compareLeaderboardUsers(a, b);
+    });
+  let rank = 1;
+  return sortedByInsight.map((u, i) => {
+    if (i > 0 && (sortedByInsight[i - 1].insightPoints ?? 0) > (u.insightPoints ?? 0)) rank += 1;
+    return { ...u, rank };
+  });
+}
+
 /** Counts predictions per team (and "other") for crowd % (shown whenever data exists). */
 /**
  * @param {number|null|undefined} participatingUserCount - non-admin users (denominator for no-pred %).
@@ -534,76 +638,51 @@ export default function Dashboard() {
     if (!leaderboardRawData) return;
     const { users, allMatches, predsByMatch, rules, programConfig } = leaderboardRawData;
     const matchStartDate = (programConfig?.matchStartDate || '').trim();
-    let completedMatches = allMatches.filter(m =>
-      (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim()
+    const previousCutoff = getPreviousMatchCutoffDate(allMatches, leaderboardDate || '');
+
+    const rankedAtPrevious = previousCutoff
+      ? computeRankedMainLeaderboard(
+          allMatches,
+          users,
+          predsByMatch,
+          rules,
+          matchStartDate,
+          previousCutoff
+        )
+      : [];
+    const rankAtPreviousById = new Map(rankedAtPrevious.map((u) => [u.id, u.rank]));
+
+    const ranked = computeRankedMainLeaderboard(
+      allMatches,
+      users,
+      predsByMatch,
+      rules,
+      matchStartDate,
+      leaderboardDate || ''
     );
-    if (leaderboardDate) {
-      completedMatches = completedMatches.filter(m => (m.date || '') <= leaderboardDate);
-    }
-    completedMatches = sortMatchesChronological(completedMatches);
-    const totals = calculateLeaderboard(completedMatches, users, predsByMatch, rules);
-    let sortedByPoints = users.map(u => ({
-      ...u,
-      points: totals[u.id] ?? 0,
-    })).sort((a, b) => {
-      const pb = b.points ?? 0;
-      const pa = a.points ?? 0;
-      if (pb !== pa) return pb - pa;
-      return compareLeaderboardUsers(a, b);
-    });
-    // Late users (joined on/after match start date, not yet approved): assign bottom user's total, not match-wise.
-    // Approved users always use normal match-by-match pointResults.
-    if (matchStartDate && sortedByPoints.length > 0) {
-      const bottomPoints = sortedByPoints[sortedByPoints.length - 1].points ?? 0;
-      sortedByPoints = sortedByPoints.map(u => {
-        const createdAtDate = (u.createdAt || '').toString().split('T')[0];
-        const isLateUser =
-          createdAtDate &&
-          createdAtDate >= matchStartDate &&
-          !isUserPredictionApproved(u);
-        return isLateUser ? { ...u, points: bottomPoints, isLateUser: true } : { ...u, isLateUser: false };
-      }).sort((a, b) => {
-        const pb = b.points ?? 0;
-        const pa = a.points ?? 0;
-        if (pb !== pa) return pb - pa;
-        return compareLeaderboardUsers(a, b);
-      });
-    }
-    let rank = 1;
-    const ranked = sortedByPoints.map((u, i) => {
-      if (i > 0 && (sortedByPoints[i - 1].points ?? 0) > (u.points ?? 0)) rank += 1;
-      return { ...u, rank };
-    });
-    setLeaderboard(ranked);
-    let insightMatches = allMatches;
-    if (leaderboardDate) {
-      insightMatches = insightMatches.filter(m => (m.date || '') <= leaderboardDate);
-    }
-    const insightTotals = {};
-    users.forEach(u => { insightTotals[u.id] = 0; });
-    insightMatches.forEach(m => {
-      const ir = m.insightPointResults;
-      if (ir && typeof ir === 'object') {
-        Object.entries(ir).forEach(([uid, pts]) => {
-          insightTotals[uid] = (insightTotals[uid] || 0) + Number(pts || 0);
-        });
-      }
-    });
-    const sortedByInsight = [...users]
-      .map(u => ({ ...u, insightPoints: insightTotals[u.id] ?? 0 }))
-      .sort((a, b) => {
-        const ib = b.insightPoints ?? 0;
-        const ia = a.insightPoints ?? 0;
-        if (ib !== ia) return ib - ia;
-        return compareLeaderboardUsers(a, b);
-      });
-    rank = 1;
-    const insightRanked = sortedByInsight.map((u, i) => {
-      if (i > 0 && (sortedByInsight[i - 1].insightPoints ?? 0) > (u.insightPoints ?? 0)) rank += 1;
-      return { ...u, rank };
-    });
-    setInsightLeaderboard(insightRanked);
+    setLeaderboard(
+      ranked.map((u) => ({
+        ...u,
+        rankAtPrevious: previousCutoff ? rankAtPreviousById.get(u.id) ?? null : null,
+      }))
+    );
+
+    const insightAtPrevious = previousCutoff
+      ? computeInsightRanked(users, allMatches, previousCutoff)
+      : [];
+    const insightRankAtPreviousById = new Map(insightAtPrevious.map((u) => [u.id, u.rank]));
+    const insightRanked = computeInsightRanked(users, allMatches, leaderboardDate || '');
+    setInsightLeaderboard(
+      insightRanked.map((u) => ({
+        ...u,
+        rankAtPrevious: previousCutoff ? insightRankAtPreviousById.get(u.id) ?? null : null,
+      }))
+    );
   }, [leaderboardRawData, leaderboardDate]);
+
+  const previousMatchCutoffDate = leaderboardRawData
+    ? getPreviousMatchCutoffDate(leaderboardRawData.allMatches, leaderboardDate || '')
+    : '';
 
   const handleChangePassword = async (e) => {
     e.preventDefault();
@@ -1020,6 +1099,22 @@ export default function Dashboard() {
                     All dates
                   </button>
                 </div>
+                <p className="muted" style={{ marginTop: '0.4rem', fontSize: '0.9rem', maxWidth: '44rem' }}>
+                  <strong>Selected</strong> rank uses points from completed matches on or before{' '}
+                  {leaderboardDate ? <strong>{leaderboardDate}</strong> : 'every date (full season)'}.
+                  {previousMatchCutoffDate ? (
+                    <>
+                      {' '}
+                      <strong>Previous</strong> rank uses points only through the last completed match <em>before</em> that
+                      window — matches on or before <strong>{previousMatchCutoffDate}</strong>.
+                    </>
+                  ) : (
+                    <>
+                      {' '}
+                      <strong>Previous</strong> rank is unavailable (no completed match strictly before the selected cutoff).
+                    </>
+                  )}
+                </p>
               </div>
             </div>
             {leaderboardTab === 'main' && (
@@ -1034,10 +1129,16 @@ export default function Dashboard() {
                     {user && (() => {
                       const myEntry = leaderboard.find(u => u.id === user.uid);
                       const myRank = myEntry?.rank ?? 0;
+                      const myPrevRank = myEntry?.rankAtPrevious ?? 0;
                       const myPoints = myEntry?.points ?? 0;
                       return (
                         <p className="leaderboard-summary">
-                          Your rank: <strong>{myRank > 0 ? `#${myRank}` : '—'}</strong>
+                          Rank (selected): <strong>{myRank > 0 ? `#${myRank}` : '—'}</strong>
+                          {previousMatchCutoffDate && (
+                            <>
+                              {' · '}Previous: <strong>{myPrevRank > 0 ? `#${myPrevRank}` : '—'}</strong>
+                            </>
+                          )}
                           {' · '}Your total points: <strong className={myPoints >= 0 ? 'points-positive' : 'points-negative'}>{myPoints}</strong>
                         </p>
                       );
@@ -1053,7 +1154,8 @@ export default function Dashboard() {
                     </button>
                     <div className={`leaderboard-table ${showWinnerLoser ? 'leaderboard-with-wl' : ''}`}>
                       <div className="leaderboard-header">
-                        <span>Rank</span>
+                        <span title="Rank for points up to the selected date">Selected</span>
+                        <span title={previousMatchCutoffDate ? `Rank using points through ${previousMatchCutoffDate} (last match before your selected date)` : 'No completed match before the selected cutoff'}>Previous</span>
                         <span>User</span>
                         <span>Points</span>
                         {showWinnerLoser && <span title={`Top ${100 - (leaderboardRawData?.programConfig?.loserPercent ?? 25)}% winner, Bottom ${leaderboardRawData?.programConfig?.loserPercent ?? 25}% loser`}>W/L</span>}
@@ -1069,6 +1171,9 @@ export default function Dashboard() {
                           return (
                             <div key={u.id} className={`leaderboard-row ${u.id === user?.uid ? 'current-user' : ''}`}>
                               <span>#{u.rank}</span>
+                              <span className="leaderboard-rank-last" title={previousMatchCutoffDate ? `Rank through ${previousMatchCutoffDate} (before selected date)` : ''}>
+                                {u.rankAtPrevious != null && u.rankAtPrevious > 0 ? `#${u.rankAtPrevious}` : '—'}
+                              </span>
                               <button
                                 type="button"
                                 className="leaderboard-username-btn"
@@ -1104,10 +1209,16 @@ export default function Dashboard() {
                     {user && (() => {
                       const myEntry = insightLeaderboard.find(u => u.id === user.uid);
                       const myRank = myEntry?.rank ?? 0;
+                      const myPrevRank = myEntry?.rankAtPrevious ?? 0;
                       const myInsightPoints = myEntry?.insightPoints ?? 0;
                       return (
                         <p className="leaderboard-summary">
-                          Your rank: <strong>{myRank > 0 ? `#${myRank}` : '—'}</strong>
+                          Rank (selected): <strong>{myRank > 0 ? `#${myRank}` : '—'}</strong>
+                          {previousMatchCutoffDate && (
+                            <>
+                              {' · '}Previous: <strong>{myPrevRank > 0 ? `#${myPrevRank}` : '—'}</strong>
+                            </>
+                          )}
                           {' · '}Your insight points: <strong className="points-positive">{myInsightPoints}</strong>
                         </p>
                       );
@@ -1123,7 +1234,8 @@ export default function Dashboard() {
                     </button>
                     <div className={`leaderboard-table ${showWinnerLoser ? 'leaderboard-with-wl' : ''}`}>
                       <div className="leaderboard-header">
-                        <span>Rank</span>
+                        <span title="Rank for insight points up to the selected date">Selected</span>
+                        <span title={previousMatchCutoffDate ? `Insight rank using points through ${previousMatchCutoffDate} (last match before selected date)` : 'No completed match before the selected cutoff'}>Previous</span>
                         <span>User</span>
                         <span>Insight Points</span>
                         {showWinnerLoser && <span title={`Top ${100 - (leaderboardRawData?.programConfig?.loserPercent ?? 25)}% winner, Bottom ${leaderboardRawData?.programConfig?.loserPercent ?? 25}% loser`}>W/L</span>}
@@ -1139,6 +1251,9 @@ export default function Dashboard() {
                           return (
                             <div key={u.id} className={`leaderboard-row ${u.id === user?.uid ? 'current-user' : ''}`}>
                               <span>#{u.rank}</span>
+                              <span className="leaderboard-rank-last" title={previousMatchCutoffDate ? `Rank through ${previousMatchCutoffDate} (before selected date)` : ''}>
+                                {u.rankAtPrevious != null && u.rankAtPrevious > 0 ? `#${u.rankAtPrevious}` : '—'}
+                              </span>
                               <span>{toInitCap(u.username || u.email || 'User')}</span>
                               <span className="points-positive">{u.insightPoints ?? 0}</span>
                               {showWinnerLoser && (
