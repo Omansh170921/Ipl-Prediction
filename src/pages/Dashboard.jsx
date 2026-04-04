@@ -28,6 +28,23 @@ function isUserPredictionApproved(userProfile) {
   return userProfile?.predictionApproved === true || userProfile?.predictionApproved === 'true';
 }
 
+/** Schedule order: date, then match number, then time (fixes same-day double-headers and point history). */
+function sortMatchesChronological(list) {
+  if (!list || list.length === 0) return [];
+  return [...list].sort((a, b) => {
+    const cmpDate = (a.date || '').localeCompare(b.date || '');
+    if (cmpDate !== 0) return cmpDate;
+    const matchNumA = parseInt(String(a.matchNumber || '0'), 10);
+    const matchNumB = parseInt(String(b.matchNumber || '0'), 10);
+    const na = Number.isNaN(matchNumA) ? 0 : matchNumA;
+    const nb = Number.isNaN(matchNumB) ? 0 : matchNumB;
+    if (na !== nb) return na - nb;
+    const timeA = String(a.time || a.slot || '00:00').padStart(5, '0');
+    const timeB = String(b.time || b.slot || '00:00').padStart(5, '0');
+    return timeA.localeCompare(timeB);
+  });
+}
+
 /** Counts predictions per team (and "other") for crowd % (shown whenever data exists). */
 /**
  * @param {number|null|undefined} participatingUserCount - non-admin users (denominator for no-pred %).
@@ -247,13 +264,7 @@ export default function Dashboard() {
       label: `${m.matchNumber || (i + 1)} - ${getTeamCode(m.team1, teams)} vs ${getTeamCode(m.team2, teams)}`,
     }));
   const historyMatchList = matchFilterDate ? dateFilteredMatches : allMatches;
-  const matchOptionsHistory = [...historyMatchList]
-    .sort((a, b) => {
-      const numA = getMatchNum(a);
-      const numB = getMatchNum(b);
-      if (numA !== numB) return numA - numB;
-      return (a.date || '').localeCompare(b.date || '');
-    })
+  const matchOptionsHistory = sortMatchesChronological(historyMatchList)
     .map((m, i) => ({
       id: m.id,
       label: `${m.matchNumber || (i + 1)} - ${getTeamCode(m.team1, teams)} vs ${getTeamCode(m.team2, teams)}`,
@@ -305,7 +316,7 @@ export default function Dashboard() {
     allMatches.length
   );
   const historyMatchesFiltered = historyMatchesRaw;
-  const historyMatches = sortMatches(historyMatchesFiltered);
+  const historyMatches = sortMatchesChronological(historyMatchesFiltered);
 
   useEffect(() => {
     const focusMatchId = searchParams.get('focusMatch');
@@ -529,7 +540,7 @@ export default function Dashboard() {
     if (leaderboardDate) {
       completedMatches = completedMatches.filter(m => (m.date || '') <= leaderboardDate);
     }
-    completedMatches.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    completedMatches = sortMatchesChronological(completedMatches);
     const totals = calculateLeaderboard(completedMatches, users, predsByMatch, rules);
     let sortedByPoints = users.map(u => ({
       ...u,
@@ -1708,9 +1719,9 @@ export default function Dashboard() {
               <button type="button" className="modal-close" onClick={() => setShowPointsHistoryModal(false)} aria-label="Close">&times;</button>
             </div>
             {(() => {
-              const completed = allMatches
-                .filter(m => (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim())
-                .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+              const completed = sortMatchesChronological(
+                allMatches.filter(m => (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim())
+              );
               let runningPred = 0;
               let runningInsight = 0;
               return completed.length === 0 ? (
@@ -1790,9 +1801,9 @@ export default function Dashboard() {
                   </p>
                 );
               }
-              let completed = matches
-                .filter(m => (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim())
-                .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+              let completed = sortMatchesChronological(
+                matches.filter(m => (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim())
+              );
               if (leaderboardDate) {
                 completed = completed.filter(m => (m.date || '') <= leaderboardDate);
               }
@@ -1841,9 +1852,9 @@ export default function Dashboard() {
               <button type="button" className="modal-close" onClick={() => setShowWinsLossesModal(false)} aria-label="Close">&times;</button>
             </div>
             {(() => {
-              const completed = allMatches
-                .filter(m => (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim())
-                .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+              const completed = sortMatchesChronological(
+                allMatches.filter(m => (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim())
+              );
               const participated = completed.filter(m => savedMatchIds.has(String(m.id)));
               const noPrediction = completed.filter(m => !savedMatchIds.has(String(m.id)));
               if (participated.length === 0 && noPrediction.length === 0) {
@@ -1988,9 +1999,9 @@ export default function Dashboard() {
               <button type="button" className="modal-close" onClick={() => setShowParticipatedModal(false)} aria-label="Close">&times;</button>
             </div>
             {(() => {
-              const participated = allMatches
-                .filter(m => savedMatchIds.has(String(m.id)))
-                .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+              const participated = sortMatchesChronological(
+                allMatches.filter(m => savedMatchIds.has(String(m.id)))
+              );
               return participated.length === 0 ? (
                 <p className="muted">No participated matches yet.</p>
               ) : (
