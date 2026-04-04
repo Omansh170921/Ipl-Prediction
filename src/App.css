@@ -2795,6 +2795,15 @@ button.stat-card.stat-card-clickable:hover {
   font-variant-numeric: tabular-nums;
 }
 
+.leaderboard-th-short {
+  display: none;
+}
+
+.leaderboard-header .leaderboard-th-rank {
+  text-align: center;
+  min-width: 0;
+}
+
 .leaderboard-table.leaderboard-with-wl .leaderboard-header,
 .leaderboard-table.leaderboard-with-wl .leaderboard-row {
   grid-template-columns: 52px 52px 1fr 80px 44px;
@@ -3251,22 +3260,38 @@ button.stat-card.stat-card-clickable:hover {
   .leaderboard-table {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
-    min-width: 280px;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .leaderboard-header .leaderboard-th-prev .leaderboard-th-long {
+    display: none;
+  }
+
+  .leaderboard-header .leaderboard-th-prev .leaderboard-th-short {
+    display: inline;
+    font-size: 0.8rem;
+    font-weight: 600;
   }
 
   .leaderboard-header,
   .leaderboard-row {
-    grid-template-columns: 36px 36px minmax(80px, 1fr) 64px;
+    grid-template-columns: minmax(2.75rem, 3.25rem) minmax(2.75rem, 3.25rem) minmax(5.5rem, 1fr) minmax(3.25rem, 4rem);
     gap: 0.5rem;
     padding: 0.65rem 0.75rem;
     font-size: 0.875rem;
-    min-width: 300px;
+    min-width: 20rem;
   }
 
   .leaderboard-table.leaderboard-with-wl .leaderboard-header,
   .leaderboard-table.leaderboard-with-wl .leaderboard-row {
-    grid-template-columns: 36px 36px minmax(80px, 1fr) 64px 36px;
-    min-width: 340px;
+    grid-template-columns: minmax(2.75rem, 3.25rem) minmax(2.75rem, 3.25rem) minmax(5.5rem, 1fr) minmax(3.25rem, 4rem) minmax(2rem, 2.75rem);
+    min-width: 22rem;
+  }
+
+  .leaderboard-row > span:nth-child(1),
+  .leaderboard-row > span:nth-child(2) {
+    text-align: center;
   }
 
   .leaderboard-username-btn {
