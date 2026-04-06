@@ -52,6 +52,23 @@ function sortMatchesChronological(list) {
   });
 }
 
+/** Newest / highest match first: date descending, match number descending, time descending. */
+function sortMatchesDescending(list) {
+  if (!list || list.length === 0) return [];
+  return [...list].sort((a, b) => {
+    const cmpDate = (b.date || '').localeCompare(a.date || '');
+    if (cmpDate !== 0) return cmpDate;
+    const matchNumA = parseInt(String(a.matchNumber || '0'), 10);
+    const matchNumB = parseInt(String(b.matchNumber || '0'), 10);
+    const na = Number.isNaN(matchNumA) ? 0 : matchNumA;
+    const nb = Number.isNaN(matchNumB) ? 0 : matchNumB;
+    if (na !== nb) return nb - na;
+    const timeA = String(a.time || a.slot || '00:00').padStart(5, '0');
+    const timeB = String(b.time || b.slot || '00:00').padStart(5, '0');
+    return timeB.localeCompare(timeA);
+  });
+}
+
 /**
  * Last completed match day strictly before the selected date (for “previous” rank).
  * If no date is selected (“All dates”), the boundary is the final completed day, so “previous”
@@ -441,7 +458,7 @@ export default function Dashboard() {
       label: `${m.matchNumber || (i + 1)} - ${getTeamCode(m.team1, teams)} vs ${getTeamCode(m.team2, teams)}`,
     }));
   const historyMatchList = matchFilterDate ? dateFilteredMatches : allMatches;
-  const matchOptionsHistory = sortMatchesChronological(historyMatchList)
+  const matchOptionsHistory = sortMatchesDescending(historyMatchList)
     .map((m, i) => ({
       id: m.id,
       label: `${m.matchNumber || (i + 1)} - ${getTeamCode(m.team1, teams)} vs ${getTeamCode(m.team2, teams)}`,
@@ -493,7 +510,7 @@ export default function Dashboard() {
     allMatches.length
   );
   const historyMatchesFiltered = historyMatchesRaw;
-  const historyMatches = sortMatchesChronological(historyMatchesFiltered);
+  const historyMatches = sortMatchesDescending(historyMatchesFiltered);
 
   useEffect(() => {
     const focusMatchId = searchParams.get('focusMatch');
@@ -1004,13 +1021,16 @@ export default function Dashboard() {
           <button type="button" className="hamburger-btn" onClick={() => setMobileMenuOpen(true)} aria-label="Open menu">
             ☰
           </button>
-          <h1>🏏 IPL Prediction Portal</h1>
+          <div className="dashboard-header-text">
+            <h1>🏏 IPL Prediction Portal</h1>
+            <p className="dashboard-header-tagline">Your season hub — predictions, stats, and matches in one place</p>
+          </div>
         </header>
 
         <div className="dashboard-content">
         {activeSection === 'dashboard' && (
           <section className="rules-section">
-            <h2>Overview</h2>
+            <h2 className="section-heading">Overview</h2>
             {(() => {
               const completedMatches = allMatches.filter(isMatchCompletedWithResult);
               /* Only matches with prediction saved to Firestore (not unsaved dropdown selection) */
@@ -1044,21 +1064,21 @@ export default function Dashboard() {
                 </button>
                 <button
                   type="button"
-                  className="stat-card stat-card-clickable"
+                  className="stat-card stat-card-clickable stat-card--predicted"
                   onClick={() => setShowParticipatedModal(true)}
-                  title="Click to view matches and your predictions"
+                  title="View every match where you saved a prediction"
                 >
                   <span className="stat-value">{participatedMatches?.length ?? 0}</span>
-                  <span className="stat-label">Matches participated</span>
+                  <span className="stat-label">Matches predicted</span>
                 </button>
                 <button
                   type="button"
                   className="stat-card stat-card-clickable"
                   onClick={() => setShowWinsLossesModal(true)}
-                  title="Click to view matches (win, loss, or not participated)"
+                  title="See wins, losses, and completed matches where you had no prediction"
                 >
                   <span className="stat-value">{wins} / {losses} / {nonPrediction}</span>
-                  <span className="stat-label">Wins / Losses / Not participated</span>
+                  <span className="stat-label">Wins / losses / missed</span>
                 </button>
                 <button
                   type="button"
@@ -1090,8 +1110,12 @@ export default function Dashboard() {
                   <span className="stat-label">Leaderboard position</span>
                 </button>
                   </div>
-                  {(leaderboardLoading && activeSection === 'dashboard') && <p className="muted">Loading stats...</p>}
-                  <p className="muted">Use the sidebar to view Teams, Rules, or Matches in detail.</p>
+                  {(leaderboardLoading && activeSection === 'dashboard') && (
+                    <p className="dashboard-loading-hint muted">Loading your stats…</p>
+                  )}
+                  <p className="dashboard-help-hint muted">
+                    Open the sidebar to jump to <strong>Teams</strong>, <strong>Rules</strong>, <strong>Matches</strong>, or your <strong>Account</strong>.
+                  </p>
                 </div>
               );
             })()}
@@ -1100,7 +1124,7 @@ export default function Dashboard() {
 
         {activeSection === 'teams' && (
           <section className="rules-section">
-            <h2>Teams</h2>
+            <h2 className="section-heading">Teams</h2>
             {loading ? (
               <p>Loading...</p>
             ) : teams.length === 0 ? (
@@ -1149,7 +1173,7 @@ export default function Dashboard() {
 
         {activeSection === 'rules' && (
           <section className="rules-section">
-            <h2>Rules</h2>
+            <h2 className="section-heading">Rules</h2>
             {loading ? (
               <p>Loading...</p>
             ) : rules.length === 0 ? (
@@ -1165,37 +1189,52 @@ export default function Dashboard() {
         )}
 
         {activeSection === 'leaderboard' && (
-          <section className="rules-section leaderboard-section">
-            <h2>🏆 Leaderboard {!leaderboardLoading && (
-              <span className="muted" style={{ fontWeight: 'normal', fontSize: '0.9em' }}>({leaderboard.length} users)</span>
-            )}</h2>
-            <div className="leaderboard-filters" style={{ marginBottom: '1rem' }}>
+          <section className="rules-section leaderboard-section" aria-labelledby="leaderboard-section-title">
+            <header className="leaderboard-page-header">
+              <div className="leaderboard-page-header-text">
+                <h2 id="leaderboard-section-title" className="leaderboard-page-title">
+                  <span className="leaderboard-page-title-icon" aria-hidden>🏆</span>
+                  Leaderboard
+                </h2>
+                <p className="leaderboard-page-subtitle">
+                  {leaderboardTab === 'main'
+                    ? 'Standings from saved match predictions. Choose a date to see ranks up to that day, and compare with your previous rank.'
+                    : 'Standings from Cricket Insights quiz points. The same date filter applies as on Match points.'}
+                </p>
+              </div>
+              {!leaderboardLoading && (
+                <span className="leaderboard-player-count" aria-live="polite">
+                  {leaderboardTab === 'main' ? leaderboard.length : insightLeaderboard.length} players
+                </span>
+              )}
+            </header>
+            <div className="leaderboard-filters">
               <div className="leaderboard-tab-row">
                 <button
                   type="button"
                   className={`filter-tag ${leaderboardTab === 'main' ? 'active' : ''}`}
                   onClick={() => setLeaderboardTab('main')}
                 >
-                  Main
+                  Match points
                 </button>
                 <button
                   type="button"
                   className={`filter-tag ${leaderboardTab === 'insights' ? 'active' : ''}`}
                   onClick={() => setLeaderboardTab('insights')}
                 >
-                  Insights
+                  Insight points
                 </button>
                 <button
                   type="button"
                   className={`filter-tag ${showWinnerLoser ? 'active' : ''}`}
                   onClick={() => setShowWinnerLoser(v => !v)}
-                  title={`Top ${100 - (leaderboardRawData?.programConfig?.loserPercent ?? 25)}% = winner 🏆, Bottom ${leaderboardRawData?.programConfig?.loserPercent ?? 25}% = loser 📉`}
+                  title={`Highlights top ${100 - (leaderboardRawData?.programConfig?.loserPercent ?? 25)}% (🏆) and bottom ${leaderboardRawData?.programConfig?.loserPercent ?? 25}% (📉) of the list`}
                 >
-                  {showWinnerLoser ? '🏆📉' : 'Show winner/loser'}
+                  {showWinnerLoser ? 'Top / bottom: on' : 'Show top & bottom'}
                 </button>
               </div>
               <div className="leaderboard-date-group">
-                <label htmlFor="leaderboard-date">Show points up to:</label>
+                <label htmlFor="leaderboard-date">Rank using matches on or before</label>
                 <div className="leaderboard-date-inputs">
                   <input
                     id="leaderboard-date"
@@ -1209,46 +1248,53 @@ export default function Dashboard() {
                     type="button"
                     className="btn btn-sm"
                     onClick={() => setLeaderboardDate('')}
-                    title="Show all dates"
+                    title="Use the full season (all dates)"
                   >
-                    All dates
+                    Full season
                   </button>
                 </div>
-                <p className="muted" style={{ marginTop: '0.4rem', fontSize: '0.9rem', maxWidth: '44rem' }}>
-                  <strong>Selected</strong> rank uses points from completed matches on or before{' '}
-                  {leaderboardDate ? <strong>{leaderboardDate}</strong> : 'every date (full season)'}.
-                  {previousMatchCutoffDate ? (
-                    <>
-                      {' '}
-                      <strong>Previous</strong> rank uses points from matches on or before{' '}
-                      <strong>{previousMatchCutoffDate}</strong>
-                      {previousRankContext?.excludeLastCompletedMatch ? (
-                        <> (today is selected but not completed yet: the single most recent completed match is excluded).</>
-                      ) : (
-                        <> — last completed match strictly before your selected date window.</>
-                      )}
-                    </>
-                  ) : previousRankContext?.excludeLastCompletedMatch ? (
-                    <>
-                      {' '}
-                      <strong>Previous</strong> rank is unavailable (need at least two completed matches to show a standing before the latest result).
-                    </>
-                  ) : (
-                    <>
-                      {' '}
-                      <strong>Previous</strong> rank is unavailable (no completed match strictly before the selected cutoff).
-                    </>
-                  )}
-                </p>
+                <div className="leaderboard-help-box">
+                  <p className="leaderboard-help-box-text">
+                    <strong>Current rank</strong> uses points from completed matches on or before{' '}
+                    {leaderboardDate ? <strong>{leaderboardDate}</strong> : <strong>the full schedule</strong>}.
+                    {previousMatchCutoffDate ? (
+                      <>
+                        {' '}
+                        <strong>Previous rank</strong> is based on matches on or before{' '}
+                        <strong>{previousMatchCutoffDate}</strong>
+                        {previousRankContext?.excludeLastCompletedMatch ? (
+                          <> (the latest finished match is ignored when today’s match is not done yet).</>
+                        ) : (
+                          <> — the last completed match before your selected window.</>
+                        )}
+                      </>
+                    ) : previousRankContext?.excludeLastCompletedMatch ? (
+                      <>
+                        {' '}
+                        <strong>Previous rank</strong> is not shown yet — we need at least two finished matches to compare.
+                      </>
+                    ) : (
+                      <>
+                        {' '}
+                        <strong>Previous rank</strong> is not available for this date (no earlier completed match to compare).
+                      </>
+                    )}
+                  </p>
+                </div>
               </div>
             </div>
             {leaderboardTab === 'main' && (
               <>
-                <p className="muted">Points: Not participated = -{pointRules.notParticipatedPoints ?? 7}, Wrong prediction = -{pointRules.wrongPredictionPoints ?? 5}. Winners share the pool equally.</p>
+                <p className="leaderboard-points-rules muted">
+                  Scoring: no prediction −{pointRules.notParticipatedPoints ?? 7} · wrong pick −{pointRules.wrongPredictionPoints ?? 5} · correct pick shares the winners’ pool.
+                </p>
                 {leaderboardLoading ? (
-                  <p>Loading leaderboard...</p>
+                  <p className="leaderboard-loading-hint muted">Loading rankings…</p>
                 ) : leaderboard.length === 0 ? (
-                  <p className="no-matches">No users yet or no completed matches with winners.</p>
+                  <div className="leaderboard-empty">
+                    <p className="leaderboard-empty-title">No standings yet</p>
+                    <p className="muted">Rankings appear once there are users and at least one completed match with a result.</p>
+                  </div>
                 ) : (
                   <>
                     {user && (() => {
@@ -1257,26 +1303,43 @@ export default function Dashboard() {
                       const myPrevRank = myEntry?.rankAtPrevious ?? 0;
                       const myPoints = myEntry?.points ?? 0;
                       return (
-                        <p className="leaderboard-summary">
-                          Rank (selected): <strong>{myRank > 0 ? `#${myRank}` : '—'}</strong>
-                          {previousMatchCutoffDate && (
-                            <>
-                              {' · '}Previous: <strong>{myPrevRank > 0 ? `#${myPrevRank}` : '—'}</strong>
-                            </>
-                          )}
-                          {' · '}Your total points: <strong className={myPoints >= 0 ? 'points-positive' : 'points-negative'}>{myPoints}</strong>
-                        </p>
+                        <div className="leaderboard-toolbar">
+                          <p className="leaderboard-summary">
+                            <span className="leaderboard-summary-item">
+                              Your rank: <strong>{myRank > 0 ? `#${myRank}` : '—'}</strong>
+                            </span>
+                            {previousMatchCutoffDate && (
+                              <span className="leaderboard-summary-item">
+                                Previous: <strong>{myPrevRank > 0 ? `#${myPrevRank}` : '—'}</strong>
+                              </span>
+                            )}
+                            <span className="leaderboard-summary-item">
+                              Match points: <strong className={myPoints >= 0 ? 'points-positive' : 'points-negative'}>{myPoints}</strong>
+                            </span>
+                          </p>
+                          <button
+                            type="button"
+                            className="btn btn-sm leaderboard-refresh-btn"
+                            onClick={() => setLeaderboardRefresh(r => r + 1)}
+                            title="Reload rankings from the server"
+                          >
+                            Refresh
+                          </button>
+                        </div>
                       );
                     })()}
-                    <button
-                      type="button"
-                      className="btn btn-sm"
-                      onClick={() => setLeaderboardRefresh(r => r + 1)}
-                      title="Refresh leaderboard"
-                      style={{ marginBottom: '1rem' }}
-                    >
-                      🔄 Refresh
-                    </button>
+                    {!user && (
+                      <div className="leaderboard-toolbar leaderboard-toolbar--solo">
+                        <button
+                          type="button"
+                          className="btn btn-sm leaderboard-refresh-btn"
+                          onClick={() => setLeaderboardRefresh(r => r + 1)}
+                          title="Reload rankings from the server"
+                        >
+                          Refresh
+                        </button>
+                      </div>
+                    )}
                     <div className={`leaderboard-table ${showWinnerLoser ? 'leaderboard-with-wl' : ''}`}>
                       <div className="leaderboard-header">
                         <span className="leaderboard-th-rank" title="Rank for points up to the selected date">
@@ -1332,11 +1395,16 @@ export default function Dashboard() {
             )}
             {leaderboardTab === 'insights' && (
               <>
-                <p className="muted">Points from correct answers in Cricket Insights questions.</p>
+                <p className="leaderboard-insight-intro muted">
+                  Points from Cricket Insights — correct answers on match-day questions. Same date filter applies as for match points.
+                </p>
                 {leaderboardLoading ? (
-                  <p>Loading leaderboard...</p>
+                  <p className="leaderboard-loading-hint muted">Loading insight rankings…</p>
                 ) : insightLeaderboard.length === 0 ? (
-                  <p className="no-matches">No insight points yet. Answer Cricket Insights questions correctly to earn points!</p>
+                  <div className="leaderboard-empty">
+                    <p className="leaderboard-empty-title">No insight points yet</p>
+                    <p className="muted">Answer Cricket Insights questions on match cards to earn points and show up here.</p>
+                  </div>
                 ) : (
                   <>
                     {user && (() => {
@@ -1345,26 +1413,43 @@ export default function Dashboard() {
                       const myPrevRank = myEntry?.rankAtPrevious ?? 0;
                       const myInsightPoints = myEntry?.insightPoints ?? 0;
                       return (
-                        <p className="leaderboard-summary">
-                          Rank (selected): <strong>{myRank > 0 ? `#${myRank}` : '—'}</strong>
-                          {previousMatchCutoffDate && (
-                            <>
-                              {' · '}Previous: <strong>{myPrevRank > 0 ? `#${myPrevRank}` : '—'}</strong>
-                            </>
-                          )}
-                          {' · '}Your insight points: <strong className="points-positive">{myInsightPoints}</strong>
-                        </p>
+                        <div className="leaderboard-toolbar">
+                          <p className="leaderboard-summary">
+                            <span className="leaderboard-summary-item">
+                              Your rank: <strong>{myRank > 0 ? `#${myRank}` : '—'}</strong>
+                            </span>
+                            {previousMatchCutoffDate && (
+                              <span className="leaderboard-summary-item">
+                                Previous: <strong>{myPrevRank > 0 ? `#${myPrevRank}` : '—'}</strong>
+                              </span>
+                            )}
+                            <span className="leaderboard-summary-item">
+                              Insight points: <strong className="points-positive">{myInsightPoints}</strong>
+                            </span>
+                          </p>
+                          <button
+                            type="button"
+                            className="btn btn-sm leaderboard-refresh-btn"
+                            onClick={() => setLeaderboardRefresh(r => r + 1)}
+                            title="Reload rankings from the server"
+                          >
+                            Refresh
+                          </button>
+                        </div>
                       );
                     })()}
-                    <button
-                      type="button"
-                      className="btn btn-sm"
-                      onClick={() => setLeaderboardRefresh(r => r + 1)}
-                      title="Refresh leaderboard"
-                      style={{ marginBottom: '1rem' }}
-                    >
-                      🔄 Refresh
-                    </button>
+                    {!user && (
+                      <div className="leaderboard-toolbar leaderboard-toolbar--solo">
+                        <button
+                          type="button"
+                          className="btn btn-sm leaderboard-refresh-btn"
+                          onClick={() => setLeaderboardRefresh(r => r + 1)}
+                          title="Reload rankings from the server"
+                        >
+                          Refresh
+                        </button>
+                      </div>
+                    )}
                     <div className={`leaderboard-table ${showWinnerLoser ? 'leaderboard-with-wl' : ''}`}>
                       <div className="leaderboard-header">
                         <span className="leaderboard-th-rank" title="Rank for insight points up to the selected date">
@@ -1423,7 +1508,7 @@ export default function Dashboard() {
 
         {activeSection === 'account' && (
         <section className="rules-section account-section">
-          <h2>Account</h2>
+          <h2 className="section-heading">Account</h2>
           <div className="account-details">
             <h3>Your Details</h3>
             <dl className="account-details-list">
@@ -1514,7 +1599,7 @@ export default function Dashboard() {
 
           {activeTab === 'today' && (
             <>
-          <h2>Today's Matches ({today})</h2>
+          <h2 className="section-heading">Today&rsquo;s matches ({today})</h2>
           {todayMatches.length > 0 && (
             <>
               <div className="filter-group">
@@ -1672,7 +1757,9 @@ export default function Dashboard() {
                 />
                 <button type="button" className="btn btn-sm" onClick={() => setMatchFilterDate('')} title="Show all dates">All dates</button>
               </div>
-              <h2>Matches History {matchFilterDate ? `(${matchFilterDate})` : '(all dates)'}</h2>
+              <h2 className="section-heading">
+                Match history {matchFilterDate ? <span className="section-heading-meta">({matchFilterDate})</span> : <span className="section-heading-meta">(all dates)</span>}
+              </h2>
               {allMatches.length > 0 && (
                 <>
                   <div className="filter-group filter-dropdown-group" style={{ flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
@@ -1978,11 +2065,15 @@ export default function Dashboard() {
 
       {showPointsHistoryModal && createPortal(
         <div className="modal-overlay" onClick={() => setShowPointsHistoryModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Points History</h3>
+          <div className="modal-content modal-content--points-history" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header modal-header--points-history">
+              <div className="modal-header-points-text">
+                <h3 id="points-history-modal-title">Prediction point history</h3>
+                <p className="modal-subtitle">{toInitCap(userProfile?.username || user?.email || 'You')}</p>
+              </div>
               <button type="button" className="modal-close" onClick={() => setShowPointsHistoryModal(false)} aria-label="Close">&times;</button>
             </div>
+            <div className="point-history-body">
             {(() => {
               const completed = sortMatchesChronological(
                 allMatches.filter(isMatchCompletedWithResult)
@@ -2001,46 +2092,86 @@ export default function Dashboard() {
                 rowsChrono.push({ m, dispPred, insightPts, runningPred, runningInsight });
               }
               const displayRows = [...rowsChrono].reverse();
+              const latest = displayRows[0];
               return completed.length === 0 ? (
-                <p className="muted">No completed matches yet.</p>
+                <div className="point-history-empty">
+                  <p className="point-history-empty-title">No completed matches yet</p>
+                  <p className="muted">Points will appear here after matches finish and points are calculated.</p>
+                </div>
               ) : (
-                <>
-                  <p className="muted" style={{ marginBottom: '0.75rem', fontSize: '0.9rem' }}>
-                    Latest matches first. Cumulative totals: <strong>Pred</strong> = match prediction points (same as <strong>Total points</strong> on the dashboard). <strong>Insight</strong> = Cricket Insights only.
+                <div className="point-history-root">
+                  {latest && (
+                    <div className="point-history-summary" role="region" aria-label="Totals">
+                      <div className="point-history-summary-main">
+                        <span className="point-history-summary-label">Total prediction points</span>
+                        <span className="point-history-summary-value">{latest.runningPred}</span>
+                      </div>
+                      {cricketInsightsConfig.enabled && (
+                        <div className="point-history-summary-secondary">
+                          <span className="muted">Insight points (running)</span>
+                          <strong className={latest.runningInsight > 0 ? 'points-positive' : ''}>{latest.runningInsight}</strong>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <p className="point-history-intro">
+                    Newest matches first. Each row shows points for that match and your running totals after it (same basis as the main leaderboard).
                   </p>
-                  <div className="points-history-scroll">
-                    <ul className="points-history-list">
+                  <div className="points-history-scroll point-history-scroll">
+                    <ul className="point-history-cards">
                       {displayRows.map(({ m, dispPred, insightPts, runningPred: rp, runningInsight: ri }) => (
-                        <li key={m.id} className="points-history-item">
-                          <span className="points-history-match">
-                            #{m.matchNumber || m.id} {getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)} ({m.date})
-                          </span>
-                          <span className="points-history-detail">
-                            <span className="muted">Result: {getMatchResultLabel(m, getTeamCode, teams)}</span>
-                            {' · '}
-                            {dispPred != null ? (
-                              <span className={dispPred >= 0 ? 'points-positive' : 'points-negative'}>Prediction: {dispPred >= 0 ? '+' : ''}{dispPred}</span>
-                            ) : (
-                              <span className="muted">—</span>
+                        <li key={m.id} className="point-history-card">
+                          <div className="point-history-card-head">
+                            <span className="point-history-card-badge">Match #{m.matchNumber || m.id}</span>
+                            <span className="point-history-card-date">{m.date}</span>
+                          </div>
+                          <p className="point-history-card-teams">
+                            {getTeamCode(m.team1, teams)} <span className="point-history-vs">vs</span> {getTeamCode(m.team2, teams)}
+                          </p>
+                          <dl className="point-history-dl">
+                            <div>
+                              <dt>Result</dt>
+                              <dd>{getMatchResultLabel(m, getTeamCode, teams)}</dd>
+                            </div>
+                            <div>
+                              <dt>This match</dt>
+                              <dd>
+                                {dispPred != null ? (
+                                  <span className={dispPred >= 0 ? 'points-positive' : 'points-negative'}>
+                                    {dispPred >= 0 ? '+' : ''}{dispPred}
+                                  </span>
+                                ) : (
+                                  <span className="muted">—</span>
+                                )}
+                              </dd>
+                            </div>
+                            {cricketInsightsConfig.enabled && (
+                              <div>
+                                <dt>Insight (this match)</dt>
+                                <dd className={insightPts > 0 ? 'points-positive' : ''}>
+                                  {insightPts > 0 ? `+${insightPts}` : '0'}
+                                </dd>
+                              </div>
                             )}
-                            {insightPts > 0 && (
-                              <span className="points-positive"> · Insight: +{insightPts}</span>
+                            <div className="point-history-dl-cumulative">
+                              <dt>Running total · Pred</dt>
+                              <dd>{rp}</dd>
+                            </div>
+                            {cricketInsightsConfig.enabled && (
+                              <div className="point-history-dl-cumulative point-history-dl-insight-row">
+                                <dt>Running total · Insight</dt>
+                                <dd className={ri > 0 ? 'points-positive' : ''}>{ri >= 0 ? '+' : ''}{ri}</dd>
+                              </div>
                             )}
-                            <span className="points-history-total">
-                              {' '}
-                              → Pred: {rp}
-                              {ri !== 0 && (
-                                <span className="muted"> · Insight: {ri >= 0 ? '+' : ''}{ri}</span>
-                              )}
-                            </span>
-                          </span>
+                          </dl>
                         </li>
                       ))}
                     </ul>
                   </div>
-                </>
+                </div>
               );
             })()}
+            </div>
           </div>
         </div>,
         document.body
@@ -2048,20 +2179,25 @@ export default function Dashboard() {
 
       {showInsightHistoryModal && user && cricketInsightsConfig.enabled && createPortal(
         <div className="modal-overlay" onClick={() => setShowInsightHistoryModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Insight History — {toInitCap(userProfile?.username || user?.email || 'You')}</h3>
+          <div className="modal-content modal-content--insight" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header modal-header--insight">
+              <div className="modal-header-insight-text">
+                <h3 id="insight-history-modal-title">Cricket insight history</h3>
+                <p className="modal-subtitle">{toInitCap(userProfile?.username || user?.email || 'You')}</p>
+              </div>
               <button type="button" className="modal-close" onClick={() => setShowInsightHistoryModal(false)} aria-label="Close">&times;</button>
             </div>
-            <InsightHistoryModalContent
-              userId={user.uid}
-              completedMatches={sortMatchesChronological(
-                allMatches.filter(isMatchCompletedWithResult)
-              )}
-              teams={teams}
-              getTeamCode={getTeamCode}
-              leaderboardRefresh={leaderboardRefresh}
-            />
+            <div className="insight-history-body">
+              <InsightHistoryModalContent
+                userId={user.uid}
+                completedMatches={sortMatchesChronological(
+                  allMatches.filter(isMatchCompletedWithResult)
+                )}
+                teams={teams}
+                getTeamCode={getTeamCode}
+                leaderboardRefresh={leaderboardRefresh}
+              />
+            </div>
           </div>
         </div>,
         document.body
@@ -2069,13 +2205,28 @@ export default function Dashboard() {
 
       {userPointHistoryModal && createPortal(
         <div className="modal-overlay" onClick={() => setUserPointHistoryModal(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>
-                {userPointHistoryModal.mode === 'insight' ? 'Insight History' : 'Point History'}
-                {' — '}
-                {toInitCap(userPointHistoryModal.user?.username || userPointHistoryModal.user?.email || 'User')}
-              </h3>
+          <div
+            className={`modal-content ${userPointHistoryModal.mode === 'insight' ? 'modal-content--insight' : 'modal-content--points-history'}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              className={`modal-header ${userPointHistoryModal.mode === 'insight' ? 'modal-header--insight' : 'modal-header--points-history'}`}
+            >
+              {userPointHistoryModal.mode === 'insight' ? (
+                <div className="modal-header-insight-text">
+                  <h3>Cricket insight history</h3>
+                  <p className="modal-subtitle">
+                    {toInitCap(userPointHistoryModal.user?.username || userPointHistoryModal.user?.email || 'User')}
+                  </p>
+                </div>
+              ) : (
+                <div className="modal-header-points-text">
+                  <h3>Prediction point history</h3>
+                  <p className="modal-subtitle">
+                    {toInitCap(userPointHistoryModal.user?.username || userPointHistoryModal.user?.email || 'User')}
+                  </p>
+                </div>
+              )}
               <button type="button" className="modal-close" onClick={() => setUserPointHistoryModal(null)} aria-label="Close">&times;</button>
             </div>
             {(() => {
@@ -2094,11 +2245,16 @@ export default function Dashboard() {
               if (historyMode === 'match' && isLateUser) {
                 const totalPts = historyUser.points ?? 0;
                 return (
-                  <p className="muted">
-                    This user joined on or after match start date ({matchStartDate}). Points are allocated as the bottom ranked user total, not match-wise.
-                    <br />
-                    <strong>Total points: {to2Decimals(totalPts)}</strong>
-                  </p>
+                  <div className="point-history-body">
+                    <div className="point-history-late-user">
+                      <p className="muted">
+                        This user joined on or after match start date ({matchStartDate}). Points are allocated as the bottom ranked user total, not match-wise.
+                      </p>
+                      <p className="point-history-late-total">
+                        <strong>Total points: {to2Decimals(totalPts)}</strong>
+                      </p>
+                    </div>
+                  </div>
                 );
               }
 
@@ -2112,13 +2268,15 @@ export default function Dashboard() {
 
               if (historyMode === 'insight') {
                 return (
-                  <InsightHistoryModalContent
-                    userId={uid}
-                    completedMatches={completed}
-                    teams={teams}
-                    getTeamCode={getTeamCode}
-                    leaderboardRefresh={leaderboardRefresh}
-                  />
+                  <div className="insight-history-body">
+                    <InsightHistoryModalContent
+                      userId={uid}
+                      completedMatches={completed}
+                      teams={teams}
+                      getTeamCode={getTeamCode}
+                      leaderboardRefresh={leaderboardRefresh}
+                    />
+                  </div>
                 );
               }
 
@@ -2132,37 +2290,67 @@ export default function Dashboard() {
                 rowsChrono.push({ m, dispPts, runningTotal });
               }
               const displayRows = [...rowsChrono].reverse();
+              const latestLb = displayRows[0];
               return completed.length === 0 ? (
-                <p className="muted">No completed matches for the selected date range.</p>
-              ) : (
-                <>
-                  <p className="muted" style={{ marginBottom: '0.75rem', fontSize: '0.9rem' }}>
-                    Latest matches first. <strong>→</strong> shows cumulative prediction points after each match (chronological).
-                  </p>
-                  <div className="points-history-scroll">
-                    <ul className="points-history-list">
-                      {displayRows.map(({ m, dispPts, runningTotal: rt }) => (
-                        <li key={m.id} className="points-history-item">
-                          <span className="points-history-match">
-                            #{m.matchNumber || m.id} {getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)} ({m.date})
-                          </span>
-                          <span className="points-history-detail">
-                            <span className="muted">Result: {getMatchResultLabel(m, getTeamCode, teams)}</span>
-                            {' · '}
-                            {dispPts != null ? (
-                              <span className={dispPts >= 0 ? 'points-positive' : 'points-negative'}>
-                                Prediction: {dispPts >= 0 ? '+' : ''}{dispPts}
-                              </span>
-                            ) : (
-                              <span className="muted">—</span>
-                            )}
-                            <span className="points-history-total"> → Pred: {rt}</span>
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
+                <div className="point-history-body">
+                  <div className="point-history-empty">
+                    <p className="point-history-empty-title">No matches in range</p>
+                    <p className="muted">No completed matches for the selected leaderboard date range.</p>
                   </div>
-                </>
+                </div>
+              ) : (
+                <div className="point-history-body">
+                  <div className="point-history-root">
+                    {latestLb && (
+                      <div className="point-history-summary" role="region" aria-label="Total prediction points">
+                        <div className="point-history-summary-main">
+                          <span className="point-history-summary-label">Total prediction points</span>
+                          <span className="point-history-summary-value">{latestLb.runningTotal}</span>
+                        </div>
+                      </div>
+                    )}
+                    <p className="point-history-intro">
+                      Newest matches first. <strong>Running total</strong> is cumulative prediction points after each match (for the selected date cutoff).
+                    </p>
+                    <div className="points-history-scroll point-history-scroll">
+                      <ul className="point-history-cards">
+                        {displayRows.map(({ m, dispPts, runningTotal: rt }) => (
+                          <li key={m.id} className="point-history-card">
+                            <div className="point-history-card-head">
+                              <span className="point-history-card-badge">Match #{m.matchNumber || m.id}</span>
+                              <span className="point-history-card-date">{m.date}</span>
+                            </div>
+                            <p className="point-history-card-teams">
+                              {getTeamCode(m.team1, teams)} <span className="point-history-vs">vs</span> {getTeamCode(m.team2, teams)}
+                            </p>
+                            <dl className="point-history-dl">
+                              <div>
+                                <dt>Result</dt>
+                                <dd>{getMatchResultLabel(m, getTeamCode, teams)}</dd>
+                              </div>
+                              <div>
+                                <dt>This match</dt>
+                                <dd>
+                                  {dispPts != null ? (
+                                    <span className={dispPts >= 0 ? 'points-positive' : 'points-negative'}>
+                                      {dispPts >= 0 ? '+' : ''}{dispPts}
+                                    </span>
+                                  ) : (
+                                    <span className="muted">—</span>
+                                  )}
+                                </dd>
+                              </div>
+                              <div className="point-history-dl-cumulative">
+                                <dt>Running total · Pred</dt>
+                                <dd>{rt}</dd>
+                              </div>
+                            </dl>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                </div>
               );
             })()}
           </div>
@@ -2172,83 +2360,162 @@ export default function Dashboard() {
 
       {showWinsLossesModal && createPortal(
         <div className="modal-overlay" onClick={() => setShowWinsLossesModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Wins / Losses / Not participated</h3>
+          <div className="modal-content modal-content--wins-losses" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header modal-header--wins-losses">
+              <div className="modal-header-wins-losses-text">
+                <h3 id="wins-losses-modal-title">Your match results</h3>
+                <p className="modal-subtitle">{toInitCap(userProfile?.username || user?.email || 'You')}</p>
+              </div>
               <button type="button" className="modal-close" onClick={() => setShowWinsLossesModal(false)} aria-label="Close">&times;</button>
             </div>
+            <div className="wins-losses-body">
             {(() => {
-              const completed = sortMatchesChronological(
+              const completed = sortMatchesDescending(
                 allMatches.filter(isMatchCompletedWithResult)
               );
               const participated = completed.filter(m => savedMatchIds.has(String(m.id)));
               const participatedTeam = participated.filter(hasTeamWinnerForScoring);
               const participatedDrawCancel = participated.filter((m) => !hasTeamWinnerForScoring(m));
               const noPrediction = completed.filter(m => !savedMatchIds.has(String(m.id)));
+              let winCount = 0;
+              let lossCount = 0;
+              participatedTeam.forEach((m) => {
+                const pred = (savedPredictions[String(m.id)] ?? savedPredictions[m.id] ?? '').toString().toLowerCase().trim();
+                const winner = (m.winner || '').toLowerCase().trim();
+                if (pred === winner) winCount++; else lossCount++;
+              });
               if (participatedTeam.length === 0 && participatedDrawCancel.length === 0 && noPrediction.length === 0) {
-                return <p className="muted">No completed matches yet.</p>;
+                return (
+                  <div className="wins-losses-empty">
+                    <p className="wins-losses-empty-title">No completed matches yet</p>
+                    <p className="muted">When matches finish, your wins, losses, and other results will show here.</p>
+                  </div>
+                );
               }
               return (
                 <>
-                  {participatedTeam.length > 0 && (
-                    <>
-                      <h4 style={{ marginTop: 0 }}>Wins &amp; Losses</h4>
-                      <ul className="points-history-list">
-                        {participatedTeam.map((m) => {
-                          const pred = (savedPredictions[String(m.id)] ?? savedPredictions[m.id] ?? '').toString().toLowerCase().trim();
-                          const winner = (m.winner || '').toLowerCase().trim();
-                          const isWin = pred === winner;
-                          return (
-                            <li key={m.id} className="points-history-item">
-                              <span className="points-history-match">
-                                #{m.matchNumber || m.id} {getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)} ({m.date})
-                              </span>
-                              <span className={`points-history-detail ${isWin ? 'points-positive' : 'points-negative'}`}>
-                                {isWin ? '✓ Win' : '✗ Loss'} — Predicted {getTeamCode(pred, teams) || pred || '?'}, winner: {getTeamCode(m.winner, teams) || m.winner}
-                              </span>
+                  <div className="wins-losses-summary" role="region" aria-label="Results summary">
+                    <ul className="wins-losses-summary-grid">
+                      <li>
+                        <span className="wins-losses-summary-label wins-losses-summary-label--win">Wins</span>
+                        <strong className="wins-losses-summary-num wins-losses-summary-num--win">{winCount}</strong>
+                      </li>
+                      <li>
+                        <span className="wins-losses-summary-label wins-losses-summary-label--loss">Losses</span>
+                        <strong className="wins-losses-summary-num wins-losses-summary-num--loss">{lossCount}</strong>
+                      </li>
+                      <li>
+                        <span className="wins-losses-summary-label">Draw / cancelled</span>
+                        <strong className="wins-losses-summary-num">{participatedDrawCancel.length}</strong>
+                      </li>
+                      <li>
+                        <span className="wins-losses-summary-label">No prediction</span>
+                        <strong className="wins-losses-summary-num wins-losses-summary-num--muted">{noPrediction.length}</strong>
+                      </li>
+                    </ul>
+                  </div>
+                  <p className="wins-losses-intro">
+                    Newest matches first. Team-based wins and losses only count when a side won; draw or cancelled matches are listed separately.
+                  </p>
+                  <div className="points-history-scroll wins-losses-modal-scroll">
+                    {participatedTeam.length > 0 && (
+                      <section className="wins-losses-section" aria-labelledby="wl-section-winloss">
+                        <h4 id="wl-section-winloss" className="wins-losses-section-title">
+                          Wins &amp; losses
+                          <span className="wins-losses-section-count">{participatedTeam.length}</span>
+                        </h4>
+                        <ul className="wins-losses-cards">
+                          {participatedTeam.map((m) => {
+                            const pred = (savedPredictions[String(m.id)] ?? savedPredictions[m.id] ?? '').toString().toLowerCase().trim();
+                            const winner = (m.winner || '').toLowerCase().trim();
+                            const isWin = pred === winner;
+                            return (
+                              <li key={m.id} className={`wins-losses-card ${isWin ? 'wins-losses-card--win' : 'wins-losses-card--loss'}`}>
+                                <div className="wins-losses-card-head">
+                                  <span className={`wins-losses-card-outcome ${isWin ? 'wins-losses-card-outcome--win' : 'wins-losses-card-outcome--loss'}`}>
+                                    {isWin ? 'Win' : 'Loss'}
+                                  </span>
+                                  <span className="wins-losses-card-date">{m.date}</span>
+                                </div>
+                                <p className="wins-losses-card-teams">
+                                  <span className="wins-losses-card-match-no">#{m.matchNumber || m.id}</span>
+                                  {' '}
+                                  {getTeamCode(m.team1, teams)} <span className="wins-losses-vs">vs</span> {getTeamCode(m.team2, teams)}
+                                </p>
+                                <dl className="wins-losses-dl">
+                                  <div>
+                                    <dt>Your pick</dt>
+                                    <dd>{getTeamCode(pred, teams) || pred || '—'}</dd>
+                                  </div>
+                                  <div>
+                                    <dt>Winner</dt>
+                                    <dd>{getTeamCode(m.winner, teams) || m.winner}</dd>
+                                  </div>
+                                </dl>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </section>
+                    )}
+                    {participatedDrawCancel.length > 0 && (
+                      <section className="wins-losses-section" aria-labelledby="wl-section-draw">
+                        <h4 id="wl-section-draw" className="wins-losses-section-title">
+                          Draw / cancelled
+                          <span className="wins-losses-section-count">{participatedDrawCancel.length}</span>
+                        </h4>
+                        <p className="wins-losses-section-hint muted">No win or loss point for these matches (prediction points are 0).</p>
+                        <ul className="wins-losses-cards">
+                          {participatedDrawCancel.map((m) => (
+                            <li key={m.id} className="wins-losses-card wins-losses-card--neutral">
+                              <div className="wins-losses-card-head">
+                                <span className="wins-losses-card-outcome wins-losses-card-outcome--neutral">Draw / cancelled</span>
+                                <span className="wins-losses-card-date">{m.date}</span>
+                              </div>
+                              <p className="wins-losses-card-teams">
+                                <span className="wins-losses-card-match-no">#{m.matchNumber || m.id}</span>
+                                {' '}
+                                {getTeamCode(m.team1, teams)} <span className="wins-losses-vs">vs</span> {getTeamCode(m.team2, teams)}
+                              </p>
+                              <p className="wins-losses-card-result muted">
+                                Result: <strong>{getMatchResultLabel(m, getTeamCode, teams)}</strong>
+                              </p>
                             </li>
-                          );
-                        })}
-                      </ul>
-                    </>
-                  )}
-                  {participatedDrawCancel.length > 0 && (
-                    <>
-                      <h4 style={{ marginTop: participatedTeam.length ? '1rem' : 0 }}>Draw / cancelled (no win or loss)</h4>
-                      <ul className="points-history-list">
-                        {participatedDrawCancel.map((m) => (
-                          <li key={m.id} className="points-history-item">
-                            <span className="points-history-match">
-                              #{m.matchNumber || m.id} {getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)} ({m.date})
-                            </span>
-                            <span className="points-history-detail muted">
-                              Result: {getMatchResultLabel(m, getTeamCode, teams)} · match points: 0
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    </>
-                  )}
-                  {noPrediction.length > 0 && (
-                    <>
-                      <h4>Not participated ({noPrediction.length})</h4>
-                      <ul className="points-history-list">
-                        {noPrediction.map((m) => (
-                          <li key={m.id} className="points-history-item">
-                            <span className="points-history-match">
-                              #{m.matchNumber || m.id} {getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)} ({m.date})
-                            </span>
-                            <span className="points-history-detail muted">
-                              Did not predict · Result: {getMatchResultLabel(m, getTeamCode, teams)}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    </>
-                  )}
+                          ))}
+                        </ul>
+                      </section>
+                    )}
+                    {noPrediction.length > 0 && (
+                      <section className="wins-losses-section" aria-labelledby="wl-section-nopred">
+                        <h4 id="wl-section-nopred" className="wins-losses-section-title">
+                          No prediction
+                          <span className="wins-losses-section-count">{noPrediction.length}</span>
+                        </h4>
+                        <ul className="wins-losses-cards">
+                          {noPrediction.map((m) => (
+                            <li key={m.id} className="wins-losses-card wins-losses-card--neutral">
+                              <div className="wins-losses-card-head">
+                                <span className="wins-losses-card-outcome wins-losses-card-outcome--skip">Skipped</span>
+                                <span className="wins-losses-card-date">{m.date}</span>
+                              </div>
+                              <p className="wins-losses-card-teams">
+                                <span className="wins-losses-card-match-no">#{m.matchNumber || m.id}</span>
+                                {' '}
+                                {getTeamCode(m.team1, teams)} <span className="wins-losses-vs">vs</span> {getTeamCode(m.team2, teams)}
+                              </p>
+                              <p className="wins-losses-card-result muted">
+                                Result: <strong>{getMatchResultLabel(m, getTeamCode, teams)}</strong>
+                              </p>
+                            </li>
+                          ))}
+                        </ul>
+                      </section>
+                    )}
+                  </div>
                 </>
               );
             })()}
+            </div>
           </div>
         </div>,
         document.body
@@ -2344,42 +2611,72 @@ export default function Dashboard() {
 
       {showParticipatedModal && createPortal(
         <div className="modal-overlay" onClick={() => setShowParticipatedModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Matches Participated</h3>
+          <div
+            className="modal-content modal-content--participated"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="participated-matches-modal-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header modal-header--participated">
+              <div className="modal-header-participated-text">
+                <h3 id="participated-matches-modal-title">Your match predictions</h3>
+                <p className="modal-subtitle">{toInitCap(userProfile?.username || user?.email || 'You')}</p>
+              </div>
               <button type="button" className="modal-close" onClick={() => setShowParticipatedModal(false)} aria-label="Close">&times;</button>
             </div>
+            <div className="participated-matches-body">
             {(() => {
-              const participatedChrono = sortMatchesChronological(
+              const displayed = sortMatchesDescending(
                 allMatches.filter(m => savedMatchIds.has(String(m.id)))
               );
-              const displayed = [...participatedChrono].reverse();
-              return participatedChrono.length === 0 ? (
-                <p className="muted">No participated matches yet.</p>
-              ) : (
+              if (displayed.length === 0) {
+                return (
+                  <div className="participated-matches-empty">
+                    <p className="participated-matches-empty-title">No matches yet</p>
+                    <p className="muted">Save a prediction for a match and it will show up in this list.</p>
+                  </div>
+                );
+              }
+              return (
                 <>
-                  <p className="muted" style={{ marginBottom: '0.75rem', fontSize: '0.9rem' }}>
-                    Latest matches first.
+                  <div className="participated-matches-summary" role="region" aria-label="Prediction count">
+                    <span className="participated-matches-summary-label">Matches with your pick</span>
+                    <strong className="participated-matches-summary-num">{displayed.length}</strong>
+                  </div>
+                  <p className="participated-matches-intro">
+                    Newest first. Your pick is shown for every match here; the final result appears once the match is complete.
                   </p>
-                  <div className="points-history-scroll">
-                    <ul className="points-history-list">
+                  <div className="points-history-scroll participated-matches-scroll">
+                    <ul className="participated-matches-list">
                       {displayed.map((m) => {
                         const predicted = savedPredictions[String(m.id)] ?? savedPredictions[m.id] ?? '';
                         const isCompleted = isMatchCompletedWithResult(m);
                         return (
-                          <li key={m.id} className="points-history-item">
-                            <span className="points-history-match">
-                              #{m.matchNumber || m.id} {getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)} ({m.date})
-                            </span>
-                            <span className="points-history-detail">
-                              Predicted: <strong>{getTeamCode(predicted, teams) || predicted || '—'}</strong>
-                              {isCompleted && (
-                                <span className="muted">
-                                  {' '}
-                                  · Result: {getMatchResultLabel(m, getTeamCode, teams)}
-                                </span>
-                              )}
-                            </span>
+                          <li key={m.id} className="participated-match-card">
+                            <div className="participated-match-card-head">
+                              <span className="participated-match-no">#{m.matchNumber || m.id}</span>
+                              <span className="participated-match-date">{m.date}</span>
+                            </div>
+                            <p className="participated-match-teams">
+                              {getTeamCode(m.team1, teams)}{' '}
+                              <span className="participated-match-vs">vs</span>{' '}
+                              {getTeamCode(m.team2, teams)}
+                            </p>
+                            <dl className="participated-match-dl">
+                              <div>
+                                <dt>Your pick</dt>
+                                <dd>{getTeamCode(predicted, teams) || predicted || '—'}</dd>
+                              </div>
+                              <div>
+                                <dt>{isCompleted ? 'Result' : 'Status'}</dt>
+                                <dd>
+                                  {isCompleted
+                                    ? getMatchResultLabel(m, getTeamCode, teams)
+                                    : <span className="participated-match-pending">Pending</span>}
+                                </dd>
+                              </div>
+                            </dl>
                           </li>
                         );
                       })}
@@ -2388,6 +2685,7 @@ export default function Dashboard() {
                 </>
               );
             })()}
+            </div>
           </div>
         </div>,
         document.body

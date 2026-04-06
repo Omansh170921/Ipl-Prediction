@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { to2Decimals } from '../utils/points';
@@ -111,12 +111,36 @@ export default function InsightHistoryModalContent({
     };
   }, [userId, refreshKey, leaderboardRefresh]);
 
+  const summary = useMemo(() => {
+    if (!rows?.length) return null;
+    const latest = rows[0];
+    const totalMatches = rows.length;
+    const totalInsight = latest.runningInsight;
+    let totalAttempted = 0;
+    let totalCorrect = 0;
+    rows.forEach((r) => {
+      totalAttempted += r.attempted;
+      totalCorrect += r.correct;
+    });
+    return { totalMatches, totalInsight, totalAttempted, totalCorrect };
+  }, [rows]);
+
   if (!completedMatches?.length) {
-    return <p className="muted">No completed matches for the selected date range.</p>;
+    return (
+      <div className="insight-history-empty">
+        <p className="insight-history-empty-title">No insight history yet</p>
+        <p className="muted">Completed matches with approved insight questions will appear here.</p>
+      </div>
+    );
   }
 
   if (loading) {
-    return <p className="muted">Loading insight history…</p>;
+    return (
+      <div className="insight-history-loading" aria-busy="true">
+        <span className="insight-history-loading-dot" aria-hidden />
+        <p>Loading your insight history…</p>
+      </div>
+    );
   }
 
   if (error) {
@@ -124,48 +148,84 @@ export default function InsightHistoryModalContent({
   }
 
   if (!rows?.length) {
-    return <p className="muted">No data.</p>;
+    return (
+      <div className="insight-history-empty">
+        <p className="insight-history-empty-title">Nothing to show</p>
+        <p className="muted">We couldn&apos;t build a history for this range. Try again.</p>
+      </div>
+    );
   }
 
   return (
-    <>
-      <p className="muted" style={{ marginBottom: '0.75rem', fontSize: '0.9rem' }}>
-        Latest matches first. Per match: approved questions, your attempts, correct / wrong (when an official answer exists), points
-        earned for that match, then <strong>→ Cumulative</strong> insight total (chronological).
+    <div className="insight-history-root">
+      {summary && (
+        <div className="insight-history-summary" role="region" aria-label="Insight summary">
+          <div className="insight-history-summary-main">
+            <span className="insight-history-summary-label">Total insight points</span>
+            <span className="insight-history-summary-value">{summary.totalInsight}</span>
+          </div>
+          <ul className="insight-history-summary-grid">
+            <li>
+              <span className="muted">Matches</span>
+              <strong>{summary.totalMatches}</strong>
+            </li>
+            <li>
+              <span className="muted">Answers given</span>
+              <strong>{summary.totalAttempted}</strong>
+            </li>
+            <li>
+              <span className="muted">Correct (official)</span>
+              <strong className="points-positive">{summary.totalCorrect}</strong>
+            </li>
+          </ul>
+        </div>
+      )}
+
+      <p className="insight-history-intro">
+        Newest matches first. Each row shows how you did on that match&apos;s insight questions and your running insight total after it.
       </p>
-      <div className="points-history-scroll">
-        <ul className="points-history-list insight-history-list">
-          {rows.map(
-            ({ m, totalQ, attempted, correct, wrong, pointsEarned, runningInsight: ri }) => (
-              <li key={m.id} className="points-history-item insight-history-item">
-                <span className="points-history-match">
-                  #{m.matchNumber || m.id} {getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)} ({m.date})
-                </span>
-                <div className="insight-history-stats">
-                  <span>
-                    Total Q: <strong>{totalQ}</strong>
-                  </span>
-                  <span>
-                    · Attempted: <strong>{attempted}</strong>
-                  </span>
-                  <span>
-                    · Correct: <strong className="points-positive">{correct}</strong>
-                  </span>
-                  <span>
-                    · Wrong: <strong className="points-negative">{wrong}</strong>
-                  </span>
-                  <span>
-                    · Points earned: <strong className="points-positive">{pointsEarned}</strong>
-                  </span>
-                  <span className="points-history-total">
-                    → Cumulative: <strong>{ri}</strong>
-                  </span>
+
+      <div className="points-history-scroll insight-history-scroll">
+        <ul className="insight-history-cards">
+          {rows.map(({ m, totalQ, attempted, correct, wrong, pointsEarned, runningInsight: ri }) => (
+            <li key={m.id} className="insight-history-card">
+              <div className="insight-history-card-head">
+                <span className="insight-history-card-badge">Match #{m.matchNumber || m.id}</span>
+                <span className="insight-history-card-date">{m.date}</span>
+              </div>
+              <p className="insight-history-card-teams">
+                {getTeamCode(m.team1, teams)} <span className="insight-history-vs">vs</span> {getTeamCode(m.team2, teams)}
+              </p>
+              <dl className="insight-history-dl">
+                <div>
+                  <dt>Questions</dt>
+                  <dd>{totalQ}</dd>
                 </div>
-              </li>
-            )
-          )}
+                <div>
+                  <dt>You answered</dt>
+                  <dd>{attempted}</dd>
+                </div>
+                <div>
+                  <dt>Correct</dt>
+                  <dd className="points-positive">{correct}</dd>
+                </div>
+                <div>
+                  <dt>Wrong</dt>
+                  <dd className="points-negative">{wrong}</dd>
+                </div>
+                <div>
+                  <dt>Points this match</dt>
+                  <dd className="points-positive">{pointsEarned}</dd>
+                </div>
+                <div className="insight-history-dl-cumulative">
+                  <dt>Running total</dt>
+                  <dd>{ri}</dd>
+                </div>
+              </dl>
+            </li>
+          ))}
         </ul>
       </div>
-    </>
+    </div>
   );
 }
