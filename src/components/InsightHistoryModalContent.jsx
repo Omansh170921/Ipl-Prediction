@@ -50,7 +50,8 @@ export default function InsightHistoryModalContent({
         const answersByQuestionId = {};
         aSnap.docs.forEach((d) => {
           const x = d.data();
-          answersByQuestionId[x.questionId] = x.answer;
+          const qid = x.questionId != null ? String(x.questionId) : '';
+          if (qid) answersByQuestionId[qid] = x.answer;
         });
 
         const questionsByMatchId = {};
@@ -75,7 +76,7 @@ export default function InsightHistoryModalContent({
           let wrong = 0;
 
           for (const q of qs) {
-            const rawAns = answersByQuestionId[q.id];
+            const rawAns = answersByQuestionId[String(q.id)];
             if (rawAns == null || String(rawAns).trim() === '') continue;
             attempted++;
             const ca = q.correctAnswer;

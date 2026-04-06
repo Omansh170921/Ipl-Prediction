@@ -1,9 +1,17 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { collection, addDoc, getDocs, query, where, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { useAuth } from '../context/AuthContext';
 import { getAppTodayDate } from '../utils/calendarDate';
-import { insightQuestionCountsTowardLimits, isInsightQuestionAnswerableInUi } from '../utils/insightQuestions';
+import {
+  insightQuestionCountsTowardLimits,
+  isInsightQuestionAnswerableInUi,
+  isInsightQuestionVisibleInDashboard,
+} from '../utils/insightQuestions';
+
+function normAns(s) {
+  return String(s ?? '').trim().toLowerCase();
+}
 
 const QUESTION_TYPES = [
   { value: 'yesno', label: 'Yes / No', options: ['Yes', 'No'] },
@@ -29,12 +37,13 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
   const [success, setSuccess] = useState('');
   const [removingQid, setRemovingQid] = useState(null);
 
-  const fetchQuestions = async () => {
+  const fetchQuestions = async (options = {}) => {
+    const silent = options.silent === true;
     if (!matchId) {
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!silent) setLoading(true);
     setError('');
     try {
       const [approvedSnap, allSnap] = await Promise.all([
@@ -45,17 +54,17 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
         )),
         getDocs(query(collection(db, 'cricket_questions'), where('matchId', '==', matchId))),
       ]);
-      setQuestions(
-        approvedSnap.docs
-          .map(d => ({ id: d.id, ...d.data() }))
-          .filter(isInsightQuestionAnswerableInUi)
-      );
+      const list = approvedSnap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(isInsightQuestionVisibleInDashboard)
+        .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+      setQuestions(list);
       setAllMatchQuestions(allSnap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (err) {
       console.error('Fetch questions error:', err);
       setError(err?.message || 'Failed to load questions. Please try again.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -66,7 +75,11 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
         query(collection(db, 'cricket_answers'), where('userId', '==', user.uid))
       );
       const map = {};
-      aSnap.docs.forEach(d => { map[d.data().questionId] = d.data().answer; });
+      aSnap.docs.forEach((d) => {
+        const x = d.data();
+        const qid = x.questionId != null ? String(x.questionId) : '';
+        if (qid) map[qid] = x.answer;
+      });
       setMyAnswers(map);
     } catch (err) {
       console.error('Fetch answers error:', err);
@@ -77,9 +90,11 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
     fetchQuestions();
   }, [user, matchId]);
 
+  const questionIdsKey = useMemo(() => questions.map((q) => q.id).sort().join(','), [questions]);
+
   useEffect(() => {
     if (questions.length > 0 && user) fetchMyAnswers();
-  }, [questions.length, user]);
+  }, [user, questionIdsKey]);
 
   useEffect(() => {
     if (!success) return;
@@ -178,9 +193,14 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
   };
 
   const handleSubmitAnswer = async (q) => {
-    const answer = answerInputs[q.id];
+    const qid = String(q.id);
+    const answer = answerInputs[qid];
     if (answer == null || String(answer).trim() === '') return;
-    if (myAnswers[q.id]) return;
+    if (myAnswers[qid]) return;
+    if ((matchStatus || '').toLowerCase() === 'completed') {
+      setError('This match is completed. You can no longer submit or change insight answers.');
+      return;
+    }
     if (q.answersDisabled === true || !isInsightQuestionAnswerableInUi(q)) {
       setError('Answers are closed for this question.');
       return;
@@ -190,7 +210,7 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
       return;
     }
     setError('');
-    setAnswerLoading(prev => ({ ...prev, [q.id]: true }));
+    setAnswerLoading((prev) => ({ ...prev, [qid]: true }));
     try {
       const existsSnap = await getDocs(
         query(collection(db, 'cricket_answers'),
@@ -198,8 +218,10 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
           where('userId', '==', user.uid))
       );
       if (!existsSnap.empty) {
-        setMyAnswers(prev => ({ ...prev, [q.id]: existsSnap.docs[0].data().answer }));
-        setAnswerLoading(prev => ({ ...prev, [q.id]: false }));
+        const existing = existsSnap.docs[0].data().answer;
+        setMyAnswers((prev) => ({ ...prev, [qid]: existing }));
+        await fetchQuestions({ silent: true });
+        setAnswerLoading((prev) => ({ ...prev, [qid]: false }));
         return;
       }
       await addDoc(collection(db, 'cricket_answers'), {
@@ -208,7 +230,9 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
         answer: String(answer).trim(),
         createdAt: new Date().toISOString(),
       });
-      setMyAnswers(prev => ({ ...prev, [q.id]: String(answer).trim() }));
+      setMyAnswers((prev) => ({ ...prev, [qid]: String(answer).trim() }));
+      await fetchQuestions({ silent: true });
+      await fetchMyAnswers();
     } catch (err) {
       console.error('Submit answer error:', err);
       const msg = err?.message || 'Failed to submit answer. Please try again.';
@@ -217,7 +241,7 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
         ? `${msg} Deploy Firestore rules: run \`npx firebase deploy --only firestore:rules\`. Ensure you're logged in.`
         : msg);
     }
-    setAnswerLoading(prev => ({ ...prev, [q.id]: false }));
+    setAnswerLoading((prev) => ({ ...prev, [qid]: false }));
   };
 
   const handleDeleteQuestion = async (q) => {
@@ -251,7 +275,11 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
   return (
     <div className="cricket-insights-inline">
       <h4 className="insight-section-title">💡 Cricket Insights</h4>
-      <p className="muted insight-section-desc">Ask or answer questions for this match. +1 point for correct answers.</p>
+      <p className="muted insight-section-desc">
+        {isMatchCompleted
+          ? 'This match is completed. You can view questions and official answers; new answers and edits are not allowed.'
+          : 'Ask or answer questions for this match. +1 point for correct answers.'}
+      </p>
       {error && <div className="alert alert-error" role="alert">{error}</div>}
       {success && <div className="alert alert-success" role="alert">{success}</div>}
       {canAskQuestion ? (
@@ -282,11 +310,16 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
         <p className="no-matches">No approved questions yet. Ask a question or wait for admin approval.</p>
       ) : (
         <div className="insights-questions-list">
-          {questions.map(q => {
-            const answered = myAnswers[q.id] != null;
+          {questions.map((q) => {
+            const qid = String(q.id);
+            const answered = myAnswers[qid] != null && String(myAnswers[qid]).trim() !== '';
             const opts = q.options || [];
+            const officialCorrect = (q.correctAnswer != null && String(q.correctAnswer).trim() !== '')
+              ? String(q.correctAnswer).trim()
+              : null;
+            const canSubmit = !answered && isInsightQuestionAnswerableInUi(q) && !isMatchCompleted;
             return (
-              <div key={q.id} className="insight-question-card">
+              <div key={qid} className="insight-question-card">
                 <div className="insight-question-header">
                   <div className="insight-question-content">
                     <h4>{q.question}</h4>
@@ -305,9 +338,33 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
                     </button>
                   )}
                 </div>
-                {answered ? (
-                  <p className="insight-answered">You answered: <strong>{myAnswers[q.id]}</strong></p>
-                ) : (
+                {!answered && isMatchCompleted && (
+                  <p className="muted insight-answers-closed">Match completed. Insight answers are closed.</p>
+                )}
+                {q.answersDisabled === true && !answered && !isMatchCompleted && (
+                  <p className="muted insight-answers-closed">Answers are closed for this question.</p>
+                )}
+                {answered && (
+                  <div className="insight-answer-summary">
+                    <p className="insight-answered">Your answer: <strong>{myAnswers[qid]}</strong></p>
+                    {officialCorrect != null && (
+                      <p className="insight-correct-answer">Correct answer: <strong>{officialCorrect}</strong></p>
+                    )}
+                    {officialCorrect != null && (
+                      <p className="insight-result-hint">
+                        {normAns(myAnswers[qid]) === normAns(officialCorrect) ? (
+                          <span className="points-positive">You got it right.</span>
+                        ) : (
+                          <span className="points-negative">Official result: see correct answer above.</span>
+                        )}
+                      </p>
+                    )}
+                    {officialCorrect == null && (
+                      <p className="muted insight-pending-correct">Official correct answer will appear when the admin sets it (usually after the match).</p>
+                    )}
+                  </div>
+                )}
+                {canSubmit && (
                   <div className="insight-answer-form">
                     {q.type === 'yesno' && (
                       <div className="insight-options">
@@ -315,10 +372,10 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
                           <label key={opt} className="insight-option-radio">
                             <input
                               type="radio"
-                              name={`q-${q.id}`}
+                              name={`q-${qid}`}
                               value={opt}
-                              checked={(answerInputs[q.id] || '') === opt}
-                              onChange={() => setAnswerInputs(prev => ({ ...prev, [q.id]: opt }))}
+                              checked={(answerInputs[qid] || '') === opt}
+                              onChange={() => setAnswerInputs(prev => ({ ...prev, [qid]: opt }))}
                             />
                             {opt}
                           </label>
@@ -331,10 +388,10 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
                           <label key={opt} className="insight-option-radio">
                             <input
                               type="radio"
-                              name={`q-${q.id}`}
+                              name={`q-${qid}`}
                               value={opt}
-                              checked={(answerInputs[q.id] || '') === opt}
-                              onChange={() => setAnswerInputs(prev => ({ ...prev, [q.id]: opt }))}
+                              checked={(answerInputs[qid] || '') === opt}
+                              onChange={() => setAnswerInputs(prev => ({ ...prev, [qid]: opt }))}
                             />
                             {opt}
                           </label>
@@ -346,21 +403,24 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
                         type="text"
                         className="form-input"
                         placeholder="Your answer"
-                        value={answerInputs[q.id] || ''}
-                        onChange={(e) => setAnswerInputs(prev => ({ ...prev, [q.id]: e.target.value }))}
+                        value={answerInputs[qid] || ''}
+                        onChange={(e) => setAnswerInputs(prev => ({ ...prev, [qid]: e.target.value }))}
                       />
                     )}
-                    {(answerInputs[q.id] || '').trim() && (
+                    {(answerInputs[qid] || '').trim() && (
                       <button
                         type="button"
                         className="btn btn-primary btn-sm"
                         onClick={() => handleSubmitAnswer(q)}
-                        disabled={answerLoading[q.id]}
+                        disabled={answerLoading[qid]}
                       >
-                        {answerLoading[q.id] ? 'Submitting...' : 'Submit Answer'}
+                        {answerLoading[qid] ? 'Submitting...' : 'Submit Answer'}
                       </button>
                     )}
                   </div>
+                )}
+                {!answered && officialCorrect != null && (isMatchCompleted || q.answersDisabled === true) && (
+                  <p className="insight-correct-answer insight-correct-only">Correct answer: <strong>{officialCorrect}</strong></p>
                 )}
               </div>
             );

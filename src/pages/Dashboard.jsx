@@ -560,11 +560,19 @@ export default function Dashboard() {
         );
         const counts = {};
         const answeredQuestions = [];
-        qSnap.docs.forEach(d => {
+        qSnap.docs.forEach((d) => {
           const data = d.data();
           const mid = data.matchId;
-          if (mid && data.answersDisabled !== true) counts[mid] = (counts[mid] || 0) + 1;
-          if (data.correctAnswer != null) answeredQuestions.push({ id: d.id, matchId: mid, correctAnswer: data.correctAnswer });
+          const midKey = mid != null && String(mid).trim() !== '' ? String(mid).trim() : '';
+          if (midKey) counts[midKey] = (counts[midKey] || 0) + 1;
+          if (data.correctAnswer != null) {
+            answeredQuestions.push({
+              id: d.id,
+              matchId: midKey,
+              correctAnswer: data.correctAnswer,
+              questionId: d.id,
+            });
+          }
         });
         setInsightQuestionCount(counts);
         const pointsByMatch = {};
@@ -574,10 +582,14 @@ export default function Dashboard() {
               query(collection(db, 'cricket_answers'), where('userId', '==', user.uid))
             );
             const myAnswers = {};
-            aSnap.docs.forEach(d => { const x = d.data(); myAnswers[x.questionId] = x.answer; });
-            answeredQuestions.forEach(q => {
+            aSnap.docs.forEach((d) => {
+              const x = d.data();
+              const qid = x.questionId != null ? String(x.questionId) : '';
+              if (qid) myAnswers[qid] = x.answer;
+            });
+            answeredQuestions.forEach((q) => {
               if (!q.matchId) return;
-              const myAns = (myAnswers[q.questionId] || '').trim().toLowerCase();
+              const myAns = (myAnswers[String(q.questionId)] || '').trim().toLowerCase();
               const correct = (q.correctAnswer || '').trim().toLowerCase();
               if (myAns && correct && myAns === correct) {
                 pointsByMatch[q.matchId] = (pointsByMatch[q.matchId] || 0) + 1;
@@ -1554,7 +1566,7 @@ export default function Dashboard() {
                         title="Ask or answer Cricket Insights questions"
                         aria-label="Cricket Insights"
                       >
-                        <span className="btn-insight-count">{insightQuestionCount[match.id] || 0}</span>
+                        <span className="btn-insight-count">{insightQuestionCount[String(match.id)] ?? 0}</span>
                         💡
                       </button>
                     )}
@@ -1733,7 +1745,7 @@ export default function Dashboard() {
                             title="Ask or answer Cricket Insights questions"
                             aria-label="Cricket Insights"
                           >
-                            <span className="btn-insight-count">{insightQuestionCount[match.id] || 0}</span>
+                            <span className="btn-insight-count">{insightQuestionCount[String(match.id)] ?? 0}</span>
                             💡
                           </button>
                         )}

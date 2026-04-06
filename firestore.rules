@@ -9,6 +9,16 @@ service cloud.firestore {
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == 'true');
     }
 
+    // Cricket insight answers: only while match is not completed (match doc status != 'completed')
+    function insightMatchNotCompleted(questionId) {
+      return exists(/databases/$(database)/documents/cricket_questions/$(questionId)) &&
+        (
+          get(/databases/$(database)/documents/cricket_questions/$(questionId)).data.matchId == null ||
+          !exists(/databases/$(database)/documents/matches/$(get(/databases/$(database)/documents/cricket_questions/$(questionId)).data.matchId)) ||
+          get(/databases/$(database)/documents/matches/$(get(/databases/$(database)/documents/cricket_questions/$(questionId)).data.matchId)).data.status != 'completed'
+        );
+    }
+
     // OTP verification during registration
     match /otps/{docId} {
       allow read, write: if true;
@@ -82,8 +92,10 @@ service cloud.firestore {
       allow read: if request.auth != null;
       allow create: if request.auth != null && request.resource.data.userId == request.auth.uid &&
         exists(/databases/$(database)/documents/cricket_questions/$(request.resource.data.questionId)) &&
-        get(/databases/$(database)/documents/cricket_questions/$(request.resource.data.questionId)).data.answersDisabled != true;
-      allow update, delete: if request.auth != null && resource.data.userId == request.auth.uid;
+        get(/databases/$(database)/documents/cricket_questions/$(request.resource.data.questionId)).data.answersDisabled != true &&
+        insightMatchNotCompleted(request.resource.data.questionId);
+      allow update, delete: if request.auth != null && resource.data.userId == request.auth.uid &&
+        insightMatchNotCompleted(resource.data.questionId);
     }
   }
 }

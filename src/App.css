@@ -1969,9 +1969,37 @@ button.stat-card.stat-card-clickable:hover {
   cursor: pointer;
 }
 
+.insight-answer-summary {
+  margin-top: 0.5rem;
+}
+
 .insight-answered {
   color: var(--cricket-green);
+  margin: 0.25rem 0 0 0;
+}
+
+.insight-correct-answer {
+  color: var(--accent);
   margin: 0.5rem 0 0 0;
+  font-weight: 500;
+}
+
+.insight-correct-only {
+  margin-top: 0.5rem;
+}
+
+.insight-result-hint {
+  margin: 0.35rem 0 0 0;
+  font-size: 0.9rem;
+}
+
+.insight-pending-correct {
+  margin: 0.35rem 0 0 0;
+  font-size: 0.9rem;
+}
+
+.insight-answers-closed {
+  margin: 0.35rem 0 0.5rem 0;
 }
 
 .insight-answer-form {
