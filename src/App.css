@@ -575,7 +575,7 @@ button.stat-card.stat-card-clickable.stat-card--predicted:hover {
   background: rgba(0, 0, 0, 0.02);
 }
 
-/* Wins / Losses / Not participated — themed header + cards */
+/* Wins / losses / missed modal — body + cards; header uses shared mint bar with other stat modals */
 .modal-content.modal-content--wins-losses {
   max-width: min(100%, 28rem);
   max-height: min(92vh, 38rem);
@@ -583,48 +583,6 @@ button.stat-card.stat-card-clickable.stat-card--predicted:hover {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-}
-
-.modal-header.modal-header--wins-losses {
-  margin: 0;
-  padding: 1rem 1.15rem 1.1rem;
-  align-items: flex-start;
-  gap: 0.75rem;
-  flex-shrink: 0;
-  background: linear-gradient(135deg, #3f0f16 0%, #7f1d1d 45%, #b91c1c 100%);
-  border-bottom: 3px solid var(--cricket-gold);
-  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.06);
-}
-
-.modal-header--wins-losses .modal-header-wins-losses-text {
-  flex: 1;
-  min-width: 0;
-}
-
-.modal-header--wins-losses h3 {
-  margin: 0;
-  color: #fff;
-  font-size: 1.2rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
-}
-
-.modal-header--wins-losses .modal-subtitle {
-  margin: 0.35rem 0 0 0;
-  font-size: 0.88rem;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.88);
-}
-
-.modal-header--wins-losses .modal-close {
-  color: rgba(255, 255, 255, 0.85);
-  flex-shrink: 0;
-  margin-top: -0.15rem;
-}
-
-.modal-header--wins-losses .modal-close:hover {
-  color: #fff;
 }
 
 .wins-losses-body {
@@ -890,7 +848,7 @@ button.stat-card.stat-card-clickable.stat-card--predicted:hover {
   }
 }
 
-/* Matches participated — teal header + prediction cards (distinct from W/L burgundy, points indigo, insight green) */
+/* Matches participated modal — body/cards below; header shares style with point history & insight modals */
 .modal-content.modal-content--participated {
   max-width: min(100%, 28rem);
   max-height: min(92vh, 38rem);
@@ -900,46 +858,65 @@ button.stat-card.stat-card-clickable.stat-card--predicted:hover {
   overflow: hidden;
 }
 
-.modal-header.modal-header--participated {
+/* Shared modal header: match predictions, point history, insight history, wins/losses/missed */
+.modal-header.modal-header--participated,
+.modal-header.modal-header--insight,
+.modal-header.modal-header--points-history,
+.modal-header.modal-header--wins-losses {
   margin: 0;
   padding: 1rem 1.15rem 1.1rem;
   align-items: flex-start;
   gap: 0.75rem;
   flex-shrink: 0;
-  background: linear-gradient(135deg, #134e4a 0%, #0f766e 42%, #14b8a6 100%);
+  background: linear-gradient(180deg, #f0fdfa 0%, #ccfbf1 55%, #a7f3e6 100%);
   border-bottom: 3px solid var(--cricket-gold);
-  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95);
 }
 
-.modal-header--participated .modal-header-participated-text {
+.modal-header--participated .modal-header-participated-text,
+.modal-header--insight .modal-header-insight-text,
+.modal-header--points-history .modal-header-points-text,
+.modal-header--wins-losses .modal-header-wins-losses-text {
   flex: 1;
   min-width: 0;
 }
 
-.modal-header--participated h3 {
+.modal-header--participated h3,
+.modal-header--insight h3,
+.modal-header--points-history h3,
+.modal-header--wins-losses h3 {
   margin: 0;
-  color: #fff;
+  color: #042f2e;
   font-size: 1.2rem;
   font-weight: 700;
   letter-spacing: 0.02em;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
 }
 
-.modal-header--participated .modal-subtitle {
+.modal-header--participated .modal-subtitle,
+.modal-header--insight .modal-subtitle,
+.modal-header--points-history .modal-subtitle,
+.modal-header--wins-losses .modal-subtitle {
   margin: 0.35rem 0 0 0;
   font-size: 0.88rem;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.9);
+  color: #374151;
+  line-height: 1.4;
 }
 
-.modal-header--participated .modal-close {
-  color: rgba(255, 255, 255, 0.85);
+.modal-header--participated .modal-close,
+.modal-header--insight .modal-close,
+.modal-header--points-history .modal-close,
+.modal-header--wins-losses .modal-close {
+  color: #5a6f63;
   flex-shrink: 0;
   margin-top: -0.15rem;
 }
 
-.modal-header--participated .modal-close:hover {
-  color: #fff;
+.modal-header--participated .modal-close:hover,
+.modal-header--insight .modal-close:hover,
+.modal-header--points-history .modal-close:hover,
+.modal-header--wins-losses .modal-close:hover {
+  color: #042f2e;
 }
 
 .participated-matches-body {
@@ -978,13 +955,13 @@ button.stat-card.stat-card-clickable.stat-card--predicted:hover {
 .participated-matches-summary-label {
   font-size: 0.8rem;
   font-weight: 600;
-  color: var(--text-muted);
+  color: #374151;
 }
 
 .participated-matches-summary-num {
   font-size: 1.35rem;
   font-weight: 800;
-  color: #0f766e;
+  color: #042f2e;
   line-height: 1;
 }
 
@@ -992,7 +969,7 @@ button.stat-card.stat-card-clickable.stat-card--predicted:hover {
   margin: 0;
   font-size: 0.86rem;
   line-height: 1.45;
-  color: var(--text-muted);
+  color: #4b5563;
 }
 
 .modal-content--participated .points-history-scroll.participated-matches-scroll {
@@ -1031,7 +1008,7 @@ button.stat-card.stat-card-clickable.stat-card--predicted:hover {
 .participated-match-no {
   font-size: 0.78rem;
   font-weight: 800;
-  color: #0f766e;
+  color: #042f2e;
   letter-spacing: 0.02em;
 }
 
@@ -1070,7 +1047,7 @@ button.stat-card.stat-card-clickable.stat-card--predicted:hover {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  color: var(--text-muted);
+  color: #6b7280;
 }
 
 .participated-match-dl dd {
@@ -1191,14 +1168,19 @@ button.stat-card.stat-card-clickable.stat-card--predicted:hover {
 
 .today-match-modal-prediction {
   margin-top: 0.5rem;
+  padding: 0.75rem 0.85rem;
+  background: #ffffff;
+  border: 1px solid #d1fae5;
+  border-radius: 10px;
+  border-left: 4px solid #0d9488;
 }
 
 .today-match-modal-prediction label {
   display: block;
   font-size: 0.9rem;
-  font-weight: 500;
+  font-weight: 600;
   margin-bottom: 0.5rem;
-  color: var(--text);
+  color: #111827;
 }
 
 .today-match-modal-prediction .prediction-row {
@@ -1693,10 +1675,22 @@ button.stat-card.stat-card-clickable.stat-card--predicted:hover {
   line-height: 1.35;
 }
 
+.match-prediction {
+  margin-top: 0.75rem;
+  padding: 0.9rem 1rem;
+  background: #ffffff;
+  border: 1px solid #d1fae5;
+  border-radius: 10px;
+  border-left: 4px solid #0d9488;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
 .match-prediction label {
   display: block;
   font-size: 0.9rem;
+  font-weight: 600;
   margin-bottom: 0.5rem;
+  color: #111827;
 }
 
 .prediction-row {
@@ -1708,9 +1702,17 @@ button.stat-card.stat-card-clickable.stat-card--predicted:hover {
 .prediction-row select {
   flex: 1;
   padding: 0.6rem;
-  border: 1px solid var(--border);
+  border: 1px solid #94a3b8;
   border-radius: 8px;
   font-size: 1rem;
+  color: #111827;
+  background: #fff;
+}
+
+.prediction-row select:focus {
+  outline: none;
+  border-color: #0d9488;
+  box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.25);
 }
 
 .saved-badge {
@@ -2893,104 +2895,20 @@ button.stat-card.stat-card-clickable.stat-card--predicted:hover {
   font-size: 1.25rem;
 }
 
-/* Insight history modal — light mint header (readable text; distinct from indigo point history) */
 .modal-content.modal-content--insight {
   max-width: min(100%, 28rem);
   padding: 0;
   overflow: hidden;
 }
 
-.modal-header.modal-header--insight {
-  margin: 0;
-  padding: 1rem 1.15rem 1.1rem;
-  align-items: flex-start;
-  gap: 0.75rem;
-  background: linear-gradient(180deg, #ecfdf5 0%, #d1fae5 45%, #a7f3d0 100%);
-  border-bottom: 3px solid var(--cricket-gold);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95);
-}
-
-.modal-header--insight .modal-header-insight-text {
-  flex: 1;
-  min-width: 0;
-}
-
-.modal-header--insight h3 {
-  margin: 0;
-  color: var(--cricket-dark);
-  font-size: 1.2rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
-
-.modal-header--insight .modal-subtitle {
-  margin: 0.35rem 0 0 0;
-  font-size: 0.88rem;
-  font-weight: 500;
-  color: #3d5248;
-  line-height: 1.4;
-}
-
-.modal-header--insight .modal-close {
-  color: #5a6f63;
-  flex-shrink: 0;
-  margin-top: -0.15rem;
-}
-
-.modal-header--insight .modal-close:hover {
-  color: var(--cricket-dark);
-}
-
 .insight-history-body {
   padding: 1.15rem 1.25rem 1.35rem;
 }
 
-/* Prediction point history modals — indigo header (distinct from insight green) */
 .modal-content.modal-content--points-history {
   max-width: min(100%, 28rem);
   padding: 0;
   overflow: hidden;
-}
-
-.modal-header.modal-header--points-history {
-  margin: 0;
-  padding: 1rem 1.15rem 1.1rem;
-  align-items: flex-start;
-  gap: 0.75rem;
-  background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 40%, #1d4ed8 100%);
-  border-bottom: 3px solid var(--cricket-gold);
-  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.06);
-}
-
-.modal-header--points-history .modal-header-points-text {
-  flex: 1;
-  min-width: 0;
-}
-
-.modal-header--points-history h3 {
-  margin: 0;
-  color: #fff;
-  font-size: 1.2rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
-}
-
-.modal-header--points-history .modal-subtitle {
-  margin: 0.35rem 0 0 0;
-  font-size: 0.88rem;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.88);
-}
-
-.modal-header--points-history .modal-close {
-  color: rgba(255, 255, 255, 0.85);
-  flex-shrink: 0;
-  margin-top: -0.15rem;
-}
-
-.modal-header--points-history .modal-close:hover {
-  color: #fff;
 }
 
 .point-history-body {
