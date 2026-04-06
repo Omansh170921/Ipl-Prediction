@@ -7,6 +7,16 @@ const admin = require('firebase-admin');
 
 admin.initializeApp();
 
+const MATCH_WINNER_DRAW = '__DRAW__';
+const MATCH_WINNER_CANCELLED = '__CANCELLED__';
+
+function formatMatchWinnerNotify(w) {
+  const x = (w || '').trim();
+  if (x === MATCH_WINNER_DRAW) return 'Draw';
+  if (x === MATCH_WINNER_CANCELLED) return 'Cancelled';
+  return x;
+}
+
 /**
  * Scheduled push notification. Runs every 5 minutes; actual check interval read from programConfig.scheduleIntervalMinutes.
  * Only TODAY's open matches where prediction cutoff is in ~15 minutes.
@@ -235,6 +245,58 @@ exports.cleanupOrphanedAuthUsers = functions.https.onCall(async (data, context) 
 });
 
 /**
+ * Set a user's Firebase Auth password (admin only). Does not affect Firestore profile.
+ */
+exports.adminSetUserPassword = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Must be logged in.');
+  }
+  const db = admin.firestore();
+  const adminDoc = await db.doc(`users/${context.auth.uid}`).get();
+  const isAdmin = adminDoc.exists && (adminDoc.data().isAdmin === true || adminDoc.data().isAdmin === 'true');
+  if (!isAdmin) {
+    throw new functions.https.HttpsError('permission-denied', 'Admin only.');
+  }
+
+  const userId = typeof data?.userId === 'string' ? data.userId.trim() : '';
+  const newPassword = typeof data?.newPassword === 'string' ? data.newPassword.trim() : '';
+  if (!userId) {
+    throw new functions.https.HttpsError('invalid-argument', 'userId is required.');
+  }
+  if (!newPassword || newPassword.length < 6) {
+    throw new functions.https.HttpsError('invalid-argument', 'Password must be at least 6 characters.');
+  }
+  if (userId === context.auth.uid) {
+    throw new functions.https.HttpsError(
+      'failed-precondition',
+      'Use your account settings on the dashboard to change your own password.',
+    );
+  }
+
+  const targetDoc = await db.doc(`users/${userId}`).get();
+  if (!targetDoc.exists) {
+    throw new functions.https.HttpsError('not-found', 'User not found in app.');
+  }
+
+  const auth = admin.auth();
+  try {
+    await auth.updateUser(userId, { password: newPassword });
+  } catch (err) {
+    const code = err.code || '';
+    if (code === 'auth/user-not-found') {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'No Firebase Auth account for this user. They may need to register again.',
+      );
+    }
+    console.error('adminSetUserPassword', userId, err);
+    throw new functions.https.HttpsError('internal', err.message || 'Failed to update password.');
+  }
+
+  return { success: true };
+});
+
+/**
  * Send push notification to all users when match points are calculated.
  * Each user gets: winner, their points earned for this match, their current total.
  * Admin only. Called from Admin panel after "Calculate points" succeeds.
@@ -306,7 +368,7 @@ exports.notifyPointsCalculated = functions.https.onCall(async (data, context) =>
 
     const title = 'Points Calculated';
     const earnedStr = earned >= 0 ? `+${earned}` : String(earned);
-    const body = `${matchLabel}. Winner: ${winner}. Points earned: ${earnedStr}. Total points: ${total}`;
+    const body = `${matchLabel}. Result: ${formatMatchWinnerNotify(winner)}. Points earned: ${earnedStr}. Total points: ${total}`;
 
     try {
       await messaging.send(

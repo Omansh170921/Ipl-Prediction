@@ -476,6 +476,17 @@ button.stat-card.stat-card-clickable:hover {
   box-shadow: 0 2px 8px rgba(46, 125, 50, 0.15);
 }
 
+.points-history-scroll {
+  max-height: min(60vh, 28rem);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-top: 0.25rem;
+  padding: 0.25rem 0.35rem 0.25rem 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.02);
+}
+
 .points-history-list {
   list-style: none;
   padding: 0;
@@ -493,6 +504,34 @@ button.stat-card.stat-card-clickable:hover {
 
 .points-history-item:last-child {
   border-bottom: none;
+}
+
+.insight-history-item {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.insight-history-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.65rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  width: 100%;
+  margin-top: 0.35rem;
+  color: var(--text-muted);
+}
+
+.insight-history-stats strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.insight-history-stats .points-history-total {
+  flex-basis: 100%;
+  margin-top: 0.2rem;
+  color: var(--text);
 }
 
 .points-history-match {

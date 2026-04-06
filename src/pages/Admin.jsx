@@ -6,6 +6,12 @@ import { db, callFunction } from '../firebase/config';
 import Sidebar from '../components/Sidebar';
 import { toInitCap } from '../utils/format';
 import { calculateMatchPoints, to2Decimals } from '../utils/points';
+import {
+  isDrawOrCancelledWinner,
+  MATCH_WINNER_DRAW,
+  MATCH_WINNER_CANCELLED,
+  getMatchResultLabel,
+} from '../utils/matchOutcomes';
 import { isPredictionEligible } from '../utils/match';
 import { getAppTodayDate } from '../utils/calendarDate';
 import { getPredictionSavedIso, formatTimeHH24 } from '../utils/predictionTime';
@@ -197,6 +203,10 @@ export default function Admin() {
   const [calculatingMatchId, setCalculatingMatchId] = useState(null);
   const [removingUserId, setRemovingUserId] = useState(null);
   const [approvingUserId, setApprovingUserId] = useState(null);
+  const [setPasswordUser, setSetPasswordUser] = useState(null);
+  const [adminSetPasswordNew, setAdminSetPasswordNew] = useState('');
+  const [adminSetPasswordConfirm, setAdminSetPasswordConfirm] = useState('');
+  const [adminSetPasswordLoading, setAdminSetPasswordLoading] = useState(false);
   const [removingRuleId, setRemovingRuleId] = useState(null);
   const [editingRule, setEditingRule] = useState(null);
   const [allUsers, setAllUsers] = useState([]);
@@ -962,6 +972,12 @@ export default function Admin() {
       setMessage('Predict-before time must not be later than match time');
       return;
     }
+    const statusLc = (editingMatch.status || '').toLowerCase();
+    const winnerTrim = (editingMatch.winner || '').trim();
+    if (statusLc === 'completed' && !winnerTrim) {
+      setMessage('When status is completed, choose a result: winner, draw, or cancelled.');
+      return;
+    }
     try {
       const est = (editingMatch.stadium || '').trim();
       const ecity = (editingMatch.city || '').trim();
@@ -970,6 +986,11 @@ export default function Admin() {
         crowd === 'inherit'
           ? { crowdPredictionVisibility: deleteField() }
           : { crowdPredictionVisibility: crowd === 'afterCutoff' ? 'afterCutoff' : 'always' };
+      const participatingUsers = (allUsers || []).filter((u) => !u.isAdmin && u.isAdmin !== 'true');
+      const pointResultsForNoScore =
+        statusLc === 'completed' && isDrawOrCancelledWinner(editingMatch.winner)
+          ? Object.fromEntries(participatingUsers.map((u) => [u.id, 0]))
+          : undefined;
       await updateDoc(doc(db, 'matches', editingMatch.id), {
         matchNumber: (editingMatch.matchNumber || '').toString().trim(),
         team1: editingMatch.team1,
@@ -981,6 +1002,7 @@ export default function Admin() {
         winner: editingMatch.winner || null,
         stadium: est || null,
         city: ecity || null,
+        ...(pointResultsForNoScore ? { pointResults: pointResultsForNoScore } : {}),
         ...crowdPatch,
       });
       setEditingMatch(null);
@@ -994,6 +1016,10 @@ export default function Admin() {
   const handleCalculatePoints = async (match) => {
     if (!match.winner?.trim()) {
       setMessage('Set winner first before calculating points.');
+      return;
+    }
+    if (isDrawOrCancelledWinner(match.winner)) {
+      setMessage('Draw and cancelled matches do not use pool scoring. Saving the match as draw/cancelled already records 0 points for everyone.');
       return;
     }
     const participatingUsers = (allUsers || []).filter(u => !u.isAdmin && u.isAdmin !== 'true');
@@ -1143,7 +1169,7 @@ export default function Admin() {
             'Team A': match.team1 || '',
             'Team B': match.team2 || '',
             'Predicted winner': predicted,
-            'Winner': (match.winner || '').trim(),
+            'Winner': getMatchResultLabel(match, getTeamCode, teams),
             'Points': n,
           });
           const agg = leaderboardTotals.get(uid) || { sum: 0, matches: 0 };
@@ -1234,6 +1260,37 @@ export default function Admin() {
       setMessage('Error: ' + err.message);
     }
     setApprovingUserId(null);
+  };
+
+  const handleAdminSetUserPasswordSubmit = async (e) => {
+    e.preventDefault();
+    if (!setPasswordUser?.id) return;
+    setMessage('');
+    if (adminSetPasswordNew !== adminSetPasswordConfirm) {
+      setMessage('Passwords do not match.');
+      return;
+    }
+    if (adminSetPasswordNew.length < 6) {
+      setMessage('Password must be at least 6 characters.');
+      return;
+    }
+    setAdminSetPasswordLoading(true);
+    try {
+      const res = await callFunction('adminSetUserPassword', {
+        userId: setPasswordUser.id,
+        newPassword: adminSetPasswordNew,
+      });
+      if (res?.data?.success) {
+        setMessage(`Password updated for ${toInitCap(setPasswordUser.username || setPasswordUser.email || 'user')}. Tell them to sign in with the new password.`);
+        setSetPasswordUser(null);
+        setAdminSetPasswordNew('');
+        setAdminSetPasswordConfirm('');
+      }
+    } catch (err) {
+      const raw = err?.message || err?.code || 'Failed to set password';
+      setMessage('Error: ' + raw);
+    }
+    setAdminSetPasswordLoading(false);
   };
 
   const handleSaveProgramConfig = async (e) => {
@@ -1929,7 +1986,7 @@ export default function Admin() {
           {activeSection === 'users' && (
           <section id="section-users" className="admin-section">
             <h2>Users <span className="users-count-badge">({allUsers.length} total)</span></h2>
-            <p className="muted">Remove users to revoke app access. Users who registered on or after the match start date need approval before they can predict. Admins cannot remove themselves.</p>
+            <p className="muted">Remove users to revoke app access. Set password updates their Firebase login (tell them the new password securely). Users who registered on or after the match start date need approval before they can predict. You cannot change your own password here—use the dashboard account settings.</p>
             {usersFetchError ? (
               <p className="alert alert-error">{usersFetchError}</p>
             ) : allUsers.length === 0 ? (
@@ -1961,6 +2018,18 @@ export default function Admin() {
                           {approvingUserId === u.id ? 'Approving...' : 'Approve for predictions'}
                         </button>
                       )}
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => {
+                          setSetPasswordUser(u);
+                          setAdminSetPasswordNew('');
+                          setAdminSetPasswordConfirm('');
+                          setMessage('');
+                        }}
+                      >
+                        Set password
+                      </button>
                       <button
                         type="button"
                         className="btn btn-secondary btn-sm"
@@ -2302,6 +2371,8 @@ export default function Admin() {
                               <option value="">— Not decided —</option>
                               <option value={editingMatch.team1}>{editingMatch.team1}</option>
                               <option value={editingMatch.team2}>{editingMatch.team2}</option>
+                              <option value={MATCH_WINNER_DRAW}>Draw</option>
+                              <option value={MATCH_WINNER_CANCELLED}>Cancelled</option>
                             </select>
                           </div>
                         )}
@@ -2338,7 +2409,13 @@ export default function Admin() {
                         {(m.stadium || m.city) && (
                           <span className="match-venue-inline">🏟 {[m.stadium, m.city].filter(Boolean).join(' · ')}</span>
                         )}
-                        {m.winner && <span className="match-winner">Winner: {getTeamCode(m.winner, teams)}</span>}
+                        {m.winner && (
+                          <span className="match-winner">
+                            {isDrawOrCancelledWinner(m.winner)
+                              ? `Result: ${getMatchResultLabel(m, getTeamCode, teams)}`
+                              : `Winner: ${getTeamCode(m.winner, teams)}`}
+                          </span>
+                        )}
                         <span className={`match-status ${(m.status || 'open').toLowerCase() === 'completed' ? 'completed' : m.date === todayCal ? 'today' : 'open'}`}>
                         {(m.status || 'open').toLowerCase() === 'completed'
                           ? 'completed'
@@ -2348,7 +2425,9 @@ export default function Admin() {
                       </span>
                       </div>
                       <div className="match-actions">
-                        {(m.status || '').toLowerCase() === 'completed' && m.winner && (
+                        {(m.status || '').toLowerCase() === 'completed' &&
+                          m.winner &&
+                          !isDrawOrCancelledWinner(m.winner) && (
                           <button
                             type="button"
                             className="btn btn-sm btn-primary"
@@ -2358,6 +2437,11 @@ export default function Admin() {
                           >
                             {calculatingMatchId === m.id ? 'Calculating...' : m.pointResults ? 'Recalculate' : 'Calculate Points'}
                           </button>
+                        )}
+                        {(m.status || '').toLowerCase() === 'completed' && isDrawOrCancelledWinner(m.winner) && (
+                          <span className="muted" style={{ fontSize: '0.85rem', alignSelf: 'center' }} title="No pool points; zeros saved for all users">
+                            No score points
+                          </span>
                         )}
                         <button
                           type="button"
@@ -2773,6 +2857,77 @@ export default function Admin() {
               </div>
             )}
           </section>
+          )}
+
+          {setPasswordUser && (
+            <div
+              className="modal-overlay"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="admin-set-password-title"
+              onClick={() => !adminSetPasswordLoading && setSetPasswordUser(null)}
+            >
+              <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h3 id="admin-set-password-title">Set password</h3>
+                  <button
+                    type="button"
+                    className="modal-close"
+                    onClick={() => !adminSetPasswordLoading && setSetPasswordUser(null)}
+                    aria-label="Close"
+                  >
+                    &times;
+                  </button>
+                </div>
+                <p className="muted">
+                  User: <strong>{toInitCap(setPasswordUser.username || setPasswordUser.email || 'User')}</strong>
+                  {setPasswordUser.email ? ` (${setPasswordUser.email})` : ''}
+                </p>
+                <form onSubmit={handleAdminSetUserPasswordSubmit} className="account-form">
+                  <div className="form-group">
+                    <label htmlFor="admin-new-pw">New password</label>
+                    <input
+                      id="admin-new-pw"
+                      type="password"
+                      value={adminSetPasswordNew}
+                      onChange={(e) => setAdminSetPasswordNew(e.target.value)}
+                      placeholder="Min 6 characters"
+                      minLength={6}
+                      autoComplete="new-password"
+                      required
+                      disabled={adminSetPasswordLoading}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="admin-confirm-pw">Confirm password</label>
+                    <input
+                      id="admin-confirm-pw"
+                      type="password"
+                      value={adminSetPasswordConfirm}
+                      onChange={(e) => setAdminSetPasswordConfirm(e.target.value)}
+                      placeholder="Confirm new password"
+                      minLength={6}
+                      autoComplete="new-password"
+                      required
+                      disabled={adminSetPasswordLoading}
+                    />
+                  </div>
+                  <div className="modal-actions">
+                    <button type="submit" className="btn btn-primary" disabled={adminSetPasswordLoading}>
+                      {adminSetPasswordLoading ? 'Saving…' : 'Save password'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      disabled={adminSetPasswordLoading}
+                      onClick={() => setSetPasswordUser(null)}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
           )}
         </div>
         )}

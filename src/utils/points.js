@@ -1,3 +1,5 @@
+import { isDrawOrCancelledWinner } from './matchOutcomes.js';
+
 export const to2Decimals = (n) => Math.round(Number(n) * 100) / 100;
 
 /**
@@ -12,6 +14,19 @@ export function calculateMatchPoints(match, allUsers, matchPredictions, pointRul
   const notParticipatedPenalty = Math.abs(Number(pointRules?.notParticipatedPoints) || 7);
   const wrongPenalty = Math.abs(Number(pointRules?.wrongPredictionPoints) || 5);
   const winner = (match.winner || '').trim();
+  if (isDrawOrCancelledWinner(winner)) {
+    return {
+      userPoints: {},
+      summary: {
+        totalUsers: allUsers?.length || 0,
+        winners: 0,
+        wrong: 0,
+        notParticipated: 0,
+        pool: 0,
+        pointsPerWinner: 0,
+      },
+    };
+  }
   if (!winner) return { userPoints: {}, summary: {} };
 
   const predMap = new Map();

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useAutoDismiss } from '../hooks/useAutoDismiss';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import CricketInsights from '../components/CricketInsights';
+import InsightHistoryModalContent from '../components/InsightHistoryModalContent';
 import { useAuth } from '../context/AuthContext';
 import { collection, query, where, getDocs, getDoc, doc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
@@ -12,6 +13,12 @@ import { getAppTodayDate } from '../utils/calendarDate';
 import { calculateLeaderboard, to2Decimals } from '../utils/points';
 import { isPredictionEligible, shouldShowCrowdPrediction } from '../utils/match';
 import { getPredictionSavedIso, formatTimeHH24 } from '../utils/predictionTime';
+import {
+  isMatchCompletedWithResult,
+  hasTeamWinnerForScoring,
+  getMatchResultLabel,
+  isDrawOrCancelledWinner,
+} from '../utils/matchOutcomes';
 
 function formatMatchTime(time) {
   if (!time) return 'TBD';
@@ -52,9 +59,7 @@ function sortMatchesChronological(list) {
  */
 function getPreviousMatchCutoffDate(allMatches, selectedDate) {
   const completed = sortMatchesChronological(
-    (allMatches || []).filter(
-      (m) => (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim()
-    )
+    (allMatches || []).filter(isMatchCompletedWithResult)
   );
   if (completed.length === 0) return '';
   const endExclusive = selectedDate && String(selectedDate).trim()
@@ -66,21 +71,14 @@ function getPreviousMatchCutoffDate(allMatches, selectedDate) {
 }
 
 function getCompletedMatchesSorted(allMatches) {
-  return sortMatchesChronological(
-    (allMatches || []).filter(
-      (m) => (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim()
-    )
-  );
+  return sortMatchesChronological((allMatches || []).filter(isMatchCompletedWithResult));
 }
 
 function hasCompletedMatchOnDate(allMatches, dateStr) {
   if (!dateStr) return false;
   const d = String(dateStr).trim();
   return (allMatches || []).some(
-    (m) =>
-      (m.status || '').toLowerCase() === 'completed' &&
-      (m.winner || '').trim() &&
-      (m.date || '').trim() === d
+    (m) => isMatchCompletedWithResult(m) && (m.date || '').trim() === d
   );
 }
 
@@ -121,9 +119,7 @@ function computeRankedMainLeaderboard(
   if (Array.isArray(completedMatchesOverride)) {
     completedMatches = sortMatchesChronological(completedMatchesOverride.slice());
   } else {
-    completedMatches = allMatches.filter(
-      (m) => (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim()
-    );
+    completedMatches = allMatches.filter(isMatchCompletedWithResult);
     if (dateCutoff) {
       completedMatches = completedMatches.filter((m) => (m.date || '') <= dateCutoff);
     }
@@ -360,7 +356,6 @@ export default function Dashboard() {
   const [surrenderError, setSurrenderError] = useState('');
   const [showSurrenderModal, setShowSurrenderModal] = useState(false);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
-  const [cpCurrentPassword, setCpCurrentPassword] = useState('');
   const [cpNewPassword, setCpNewPassword] = useState('');
   const [cpConfirmPassword, setCpConfirmPassword] = useState('');
   const [cpLoading, setCpLoading] = useState(false);
@@ -372,6 +367,7 @@ export default function Dashboard() {
   const [participantsModal, setParticipantsModal] = useState(null);
   const [participantsLoading, setParticipantsLoading] = useState(false);
   const [showPointsHistoryModal, setShowPointsHistoryModal] = useState(false);
+  const [showInsightHistoryModal, setShowInsightHistoryModal] = useState(false);
   const [showWinsLossesModal, setShowWinsLossesModal] = useState(false);
   const [showParticipatedModal, setShowParticipatedModal] = useState(false);
   const [showTodayMatchesModal, setShowTodayMatchesModal] = useState(false);
@@ -804,15 +800,10 @@ export default function Dashboard() {
       setCpMessage('New password must be at least 6 characters');
       return;
     }
-    if (!cpCurrentPassword) {
-      setCpMessage('Current password is required');
-      return;
-    }
     setCpLoading(true);
     try {
-      await changePassword(cpCurrentPassword, cpNewPassword);
+      await changePassword(cpNewPassword);
       setCpMessage('Password changed successfully.');
-      setCpCurrentPassword('');
       setCpNewPassword('');
       setCpConfirmPassword('');
       setTimeout(() => {
@@ -820,7 +811,12 @@ export default function Dashboard() {
         setCpMessage('');
       }, 1500);
     } catch (err) {
-      setCpMessage(err?.message?.includes('limit') ? err.message : 'Invalid credential please validate.');
+      const code = err?.code || '';
+      if (code === 'auth/requires-recent-login') {
+        setCpMessage('For security, sign out and sign in again, then set your new password.');
+      } else {
+        setCpMessage(err?.message?.includes('limit') ? err.message : (err?.message || 'Could not update password.'));
+      }
     }
     setCpLoading(false);
   };
@@ -1004,17 +1000,18 @@ export default function Dashboard() {
           <section className="rules-section">
             <h2>Overview</h2>
             {(() => {
-              const completedMatches = allMatches.filter(m =>
-                (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim()
-              );
+              const completedMatches = allMatches.filter(isMatchCompletedWithResult);
               /* Only matches with prediction saved to Firestore (not unsaved dropdown selection) */
               const participatedMatches = allMatches.filter(m => savedMatchIds.has(String(m.id)));
               const completedParticipated = completedMatches.filter(m => savedMatchIds.has(String(m.id)));
-              const wins = completedParticipated.filter(m => {
+              const completedParticipatedTeam = completedMatches.filter(
+                (m) => savedMatchIds.has(String(m.id)) && hasTeamWinnerForScoring(m)
+              );
+              const wins = completedParticipatedTeam.filter(m => {
                 const pred = savedPredictions[String(m.id)] ?? savedPredictions[m.id] ?? '';
                 return (pred || '').toString().toLowerCase().trim() === (m.winner || '').toLowerCase().trim();
               }).length;
-              const losses = completedParticipated.length - wins;
+              const losses = completedParticipatedTeam.length - wins;
               const nonPrediction = completedMatches.length - completedParticipated.length;
               const totalPoints = leaderboard.find(u => u.id === user?.uid)?.points ??
                 completedMatches.reduce((sum, m) => sum + (m.pointResults?.[user?.uid] ?? 0), 0);
@@ -1064,11 +1061,8 @@ export default function Dashboard() {
                   <button
                     type="button"
                     className="stat-card stat-card-clickable"
-                    onClick={() => {
-                      setLeaderboardTab('insights');
-                      setActiveSection('leaderboard');
-                    }}
-                    title="Cricket Insights points (separate from match predictions)"
+                    onClick={() => setShowInsightHistoryModal(true)}
+                    title="View your Cricket Insights history (questions, attempts, points per match)"
                   >
                     <span className={`stat-value ${insightPointsTotal > 0 ? 'points-positive' : ''}`}>{insightPointsTotal}</span>
                     <span className="stat-label">Insight points</span>
@@ -1304,8 +1298,8 @@ export default function Dashboard() {
                               <button
                                 type="button"
                                 className="leaderboard-username-btn"
-                                onClick={() => setUserPointHistoryModal(u)}
-                                title="View point history"
+                                onClick={() => setUserPointHistoryModal({ user: u, mode: 'match' })}
+                                title="View match point history"
                               >
                                 {toInitCap(u.username || u.email || 'User')}
                               </button>
@@ -1389,7 +1383,14 @@ export default function Dashboard() {
                               <span className="leaderboard-rank-last" title={insightPreviousColumnTitle}>
                                 {u.rankAtPrevious != null && u.rankAtPrevious > 0 ? `#${u.rankAtPrevious}` : '—'}
                               </span>
-                              <span>{toInitCap(u.username || u.email || 'User')}</span>
+                              <button
+                                type="button"
+                                className="leaderboard-username-btn"
+                                onClick={() => setUserPointHistoryModal({ user: u, mode: 'insight' })}
+                                title="View insight point history"
+                              >
+                                {toInitCap(u.username || u.email || 'User')}
+                              </button>
                               <span className="points-positive">{u.insightPoints ?? 0}</span>
                               {showWinnerLoser && (
                                 <span title={isWinner ? `Winner (top ${100 - loserVal}%)` : `Loser (bottom ${loserVal}%)`} className="leaderboard-wl-symbol">
@@ -1584,7 +1585,13 @@ export default function Dashboard() {
                         {(match.status || '').toLowerCase() !== 'completed' && (
                           <p className="prediction-closed">Prediction closed. Cutoff was {formatMatchTime(match.thresholdTime || match.time)} on {match.date}.</p>
                         )}
-                        {match.winner && <p className="match-winner-badge">🏆 Winner: {getTeamCode(match.winner, teams)}</p>}
+                        {match.winner && (
+                          <p className="match-winner-badge">
+                            {isDrawOrCancelledWinner(match.winner)
+                              ? `🏁 Result: ${getMatchResultLabel(match, getTeamCode, teams)}`
+                              : `🏆 Winner: ${getTeamCode(match.winner, teams)}`}
+                          </p>
+                        )}
                         <div className="match-points-row">
                           {match.pointResults && match.pointResults[user?.uid] != null && (
                             <p className="match-points-badge">Your points: <strong className={match.pointResults[user.uid] >= 0 ? 'points-positive' : 'points-negative'}>{match.pointResults[user.uid]}</strong></p>
@@ -1752,7 +1759,13 @@ export default function Dashboard() {
                         {formatMatchVenue(match) && (
                           <p className="match-venue">🏟 {formatMatchVenue(match)}</p>
                         )}
-                        {match.winner && <p className="match-winner-badge">🏆 Winner: {getTeamCode(match.winner, teams)}</p>}
+                        {match.winner && (
+                          <p className="match-winner-badge">
+                            {isDrawOrCancelledWinner(match.winner)
+                              ? `🏁 Result: ${getMatchResultLabel(match, getTeamCode, teams)}`
+                              : `🏆 Winner: ${getTeamCode(match.winner, teams)}`}
+                          </p>
+                        )}
                       </div>
                       {(() => {
                         const displayVal = savedMatchIds.has(String(match.id))
@@ -1800,16 +1813,6 @@ export default function Dashboard() {
               </div>
             )}
             <form onSubmit={handleChangePassword} className="account-form">
-              <div className="form-group">
-                <label>Current Password</label>
-                <input
-                  type="password"
-                  value={cpCurrentPassword}
-                  onChange={(e) => setCpCurrentPassword(e.target.value)}
-                  placeholder="Enter current password"
-                  required
-                />
-              </div>
               <div className="form-group">
                 <label>New Password</label>
                 <input
@@ -1900,7 +1903,7 @@ export default function Dashboard() {
                 {(() => {
                   const m = participantsModal.match;
                   const predictionsHidden = isPredictionEligible(m);
-                  const isCompleted = (m?.status || '').toLowerCase() === 'completed' && (m?.winner || '').trim();
+                  const isCompleted = isMatchCompletedWithResult(m);
                   const pointResults = m?.pointResults && typeof m.pointResults === 'object' ? m.pointResults : null;
                   const showPoints = isCompleted && pointResults;
                   const showPredictedTime = !predictionsHidden;
@@ -1970,32 +1973,39 @@ export default function Dashboard() {
             </div>
             {(() => {
               const completed = sortMatchesChronological(
-                allMatches.filter(m => (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim())
+                allMatches.filter(isMatchCompletedWithResult)
               );
+              const rowsChrono = [];
               let runningPred = 0;
               let runningInsight = 0;
+              for (const m of completed) {
+                const predPoints = m.pointResults?.[user?.uid];
+                const insightPts = to2Decimals(insightPointsByMatch[m.id] ?? 0);
+                const predVal = predPoints != null ? Number(predPoints) : 0;
+                const insVal = Number(insightPointsByMatch[m.id] ?? 0);
+                runningPred = to2Decimals(runningPred + predVal);
+                runningInsight = to2Decimals(runningInsight + insVal);
+                const dispPred = predPoints != null ? to2Decimals(predPoints) : null;
+                rowsChrono.push({ m, dispPred, insightPts, runningPred, runningInsight });
+              }
+              const displayRows = [...rowsChrono].reverse();
               return completed.length === 0 ? (
                 <p className="muted">No completed matches yet.</p>
               ) : (
                 <>
                   <p className="muted" style={{ marginBottom: '0.75rem', fontSize: '0.9rem' }}>
-                    Cumulative totals: <strong>Pred</strong> = match prediction points (same as <strong>Total points</strong> on the dashboard). <strong>Insight</strong> = Cricket Insights only.
+                    Latest matches first. Cumulative totals: <strong>Pred</strong> = match prediction points (same as <strong>Total points</strong> on the dashboard). <strong>Insight</strong> = Cricket Insights only.
                   </p>
-                  <ul className="points-history-list">
-                    {completed.map((m) => {
-                      const predPoints = m.pointResults?.[user?.uid];
-                      const insightPts = to2Decimals(insightPointsByMatch[m.id] ?? 0);
-                      const predVal = predPoints != null ? Number(predPoints) : 0;
-                      const insVal = Number(insightPointsByMatch[m.id] ?? 0);
-                      runningPred = to2Decimals(runningPred + predVal);
-                      runningInsight = to2Decimals(runningInsight + insVal);
-                      const dispPred = predPoints != null ? to2Decimals(predPoints) : null;
-                      return (
+                  <div className="points-history-scroll">
+                    <ul className="points-history-list">
+                      {displayRows.map(({ m, dispPred, insightPts, runningPred: rp, runningInsight: ri }) => (
                         <li key={m.id} className="points-history-item">
                           <span className="points-history-match">
                             #{m.matchNumber || m.id} {getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)} ({m.date})
                           </span>
                           <span className="points-history-detail">
+                            <span className="muted">Result: {getMatchResultLabel(m, getTeamCode, teams)}</span>
+                            {' · '}
                             {dispPred != null ? (
                               <span className={dispPred >= 0 ? 'points-positive' : 'points-negative'}>Prediction: {dispPred >= 0 ? '+' : ''}{dispPred}</span>
                             ) : (
@@ -2006,19 +2016,40 @@ export default function Dashboard() {
                             )}
                             <span className="points-history-total">
                               {' '}
-                              → Pred: {runningPred}
-                              {runningInsight !== 0 && (
-                                <span className="muted"> · Insight: {runningInsight >= 0 ? '+' : ''}{runningInsight}</span>
+                              → Pred: {rp}
+                              {ri !== 0 && (
+                                <span className="muted"> · Insight: {ri >= 0 ? '+' : ''}{ri}</span>
                               )}
                             </span>
                           </span>
                         </li>
-                      );
-                    })}
-                  </ul>
+                      ))}
+                    </ul>
+                  </div>
                 </>
               );
             })()}
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {showInsightHistoryModal && user && cricketInsightsConfig.enabled && createPortal(
+        <div className="modal-overlay" onClick={() => setShowInsightHistoryModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Insight History — {toInitCap(userProfile?.username || user?.email || 'You')}</h3>
+              <button type="button" className="modal-close" onClick={() => setShowInsightHistoryModal(false)} aria-label="Close">&times;</button>
+            </div>
+            <InsightHistoryModalContent
+              userId={user.uid}
+              completedMatches={sortMatchesChronological(
+                allMatches.filter(isMatchCompletedWithResult)
+              )}
+              teams={teams}
+              getTeamCode={getTeamCode}
+              leaderboardRefresh={leaderboardRefresh}
+            />
           </div>
         </div>,
         document.body
@@ -2028,21 +2059,28 @@ export default function Dashboard() {
         <div className="modal-overlay" onClick={() => setUserPointHistoryModal(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>Point History — {toInitCap(userPointHistoryModal.username || userPointHistoryModal.email || 'User')}</h3>
+              <h3>
+                {userPointHistoryModal.mode === 'insight' ? 'Insight History' : 'Point History'}
+                {' — '}
+                {toInitCap(userPointHistoryModal.user?.username || userPointHistoryModal.user?.email || 'User')}
+              </h3>
               <button type="button" className="modal-close" onClick={() => setUserPointHistoryModal(null)} aria-label="Close">&times;</button>
             </div>
             {(() => {
+              const historyUser = userPointHistoryModal.user;
+              const historyMode = userPointHistoryModal.mode === 'insight' ? 'insight' : 'match';
               const matches = leaderboardRawData?.allMatches || [];
               const progConfig = leaderboardRawData?.programConfig || {};
               const matchStartDate = (progConfig.matchStartDate || '').trim();
-              const createdAtDate = (userPointHistoryModal.createdAt || '').toString().split('T')[0];
+              const createdAtDate = (historyUser.createdAt || '').toString().split('T')[0];
               const isLateUser =
                 matchStartDate &&
                 createdAtDate &&
                 createdAtDate >= matchStartDate &&
-                !isUserPredictionApproved(userPointHistoryModal);
-              if (isLateUser) {
-                const totalPts = userPointHistoryModal.points ?? 0;
+                !isUserPredictionApproved(historyUser);
+
+              if (historyMode === 'match' && isLateUser) {
+                const totalPts = historyUser.points ?? 0;
                 return (
                   <p className="muted">
                     This user joined on or after match start date ({matchStartDate}). Points are allocated as the bottom ranked user total, not match-wise.
@@ -2051,42 +2089,68 @@ export default function Dashboard() {
                   </p>
                 );
               }
+
               let completed = sortMatchesChronological(
-                matches.filter(m => (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim())
+                matches.filter(isMatchCompletedWithResult)
               );
               if (leaderboardDate) {
                 completed = completed.filter(m => (m.date || '') <= leaderboardDate);
               }
-              const uid = userPointHistoryModal.id;
+              const uid = historyUser.id;
+
+              if (historyMode === 'insight') {
+                return (
+                  <InsightHistoryModalContent
+                    userId={uid}
+                    completedMatches={completed}
+                    teams={teams}
+                    getTeamCode={getTeamCode}
+                    leaderboardRefresh={leaderboardRefresh}
+                  />
+                );
+              }
+
+              const rowsChrono = [];
               let runningTotal = 0;
+              for (const m of completed) {
+                const predPoints = m.pointResults?.[uid];
+                const predVal = predPoints != null ? Number(predPoints) : 0;
+                runningTotal = to2Decimals(runningTotal + predVal);
+                const dispPts = predPoints != null ? to2Decimals(predPoints) : null;
+                rowsChrono.push({ m, dispPts, runningTotal });
+              }
+              const displayRows = [...rowsChrono].reverse();
               return completed.length === 0 ? (
                 <p className="muted">No completed matches for the selected date range.</p>
               ) : (
-                <ul className="points-history-list">
-                  {completed.map((m) => {
-                    const predPoints = m.pointResults?.[uid];
-                    const predVal = predPoints != null ? Number(predPoints) : 0;
-                    runningTotal = to2Decimals(runningTotal + predVal);
-                    const dispPts = predPoints != null ? to2Decimals(predPoints) : null;
-                    return (
-                      <li key={m.id} className="points-history-item">
-                        <span className="points-history-match">
-                          #{m.matchNumber || m.id} {getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)} ({m.date})
-                        </span>
-                        <span className="points-history-detail">
-                          {dispPts != null ? (
-                            <span className={dispPts >= 0 ? 'points-positive' : 'points-negative'}>
-                              {dispPts >= 0 ? '+' : ''}{dispPts}
-                            </span>
-                          ) : (
-                            <span className="muted">—</span>
-                          )}
-                          <span className="points-history-total"> → {runningTotal}</span>
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ul>
+                <>
+                  <p className="muted" style={{ marginBottom: '0.75rem', fontSize: '0.9rem' }}>
+                    Latest matches first. <strong>→</strong> shows cumulative prediction points after each match (chronological).
+                  </p>
+                  <div className="points-history-scroll">
+                    <ul className="points-history-list">
+                      {displayRows.map(({ m, dispPts, runningTotal: rt }) => (
+                        <li key={m.id} className="points-history-item">
+                          <span className="points-history-match">
+                            #{m.matchNumber || m.id} {getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)} ({m.date})
+                          </span>
+                          <span className="points-history-detail">
+                            <span className="muted">Result: {getMatchResultLabel(m, getTeamCode, teams)}</span>
+                            {' · '}
+                            {dispPts != null ? (
+                              <span className={dispPts >= 0 ? 'points-positive' : 'points-negative'}>
+                                Prediction: {dispPts >= 0 ? '+' : ''}{dispPts}
+                              </span>
+                            ) : (
+                              <span className="muted">—</span>
+                            )}
+                            <span className="points-history-total"> → Pred: {rt}</span>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </>
               );
             })()}
           </div>
@@ -2103,20 +2167,22 @@ export default function Dashboard() {
             </div>
             {(() => {
               const completed = sortMatchesChronological(
-                allMatches.filter(m => (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim())
+                allMatches.filter(isMatchCompletedWithResult)
               );
               const participated = completed.filter(m => savedMatchIds.has(String(m.id)));
+              const participatedTeam = participated.filter(hasTeamWinnerForScoring);
+              const participatedDrawCancel = participated.filter((m) => !hasTeamWinnerForScoring(m));
               const noPrediction = completed.filter(m => !savedMatchIds.has(String(m.id)));
-              if (participated.length === 0 && noPrediction.length === 0) {
+              if (participatedTeam.length === 0 && participatedDrawCancel.length === 0 && noPrediction.length === 0) {
                 return <p className="muted">No completed matches yet.</p>;
               }
               return (
                 <>
-                  {participated.length > 0 && (
+                  {participatedTeam.length > 0 && (
                     <>
                       <h4 style={{ marginTop: 0 }}>Wins &amp; Losses</h4>
                       <ul className="points-history-list">
-                        {participated.map((m) => {
+                        {participatedTeam.map((m) => {
                           const pred = (savedPredictions[String(m.id)] ?? savedPredictions[m.id] ?? '').toString().toLowerCase().trim();
                           const winner = (m.winner || '').toLowerCase().trim();
                           const isWin = pred === winner;
@@ -2134,6 +2200,23 @@ export default function Dashboard() {
                       </ul>
                     </>
                   )}
+                  {participatedDrawCancel.length > 0 && (
+                    <>
+                      <h4 style={{ marginTop: participatedTeam.length ? '1rem' : 0 }}>Draw / cancelled (no win or loss)</h4>
+                      <ul className="points-history-list">
+                        {participatedDrawCancel.map((m) => (
+                          <li key={m.id} className="points-history-item">
+                            <span className="points-history-match">
+                              #{m.matchNumber || m.id} {getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)} ({m.date})
+                            </span>
+                            <span className="points-history-detail muted">
+                              Result: {getMatchResultLabel(m, getTeamCode, teams)} · match points: 0
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
                   {noPrediction.length > 0 && (
                     <>
                       <h4>Not participated ({noPrediction.length})</h4>
@@ -2144,7 +2227,7 @@ export default function Dashboard() {
                               #{m.matchNumber || m.id} {getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)} ({m.date})
                             </span>
                             <span className="points-history-detail muted">
-                              Did not predict · Winner: {getTeamCode(m.winner, teams) || m.winner}
+                              Did not predict · Result: {getMatchResultLabel(m, getTeamCode, teams)}
                             </span>
                           </li>
                         ))}
@@ -2228,7 +2311,13 @@ export default function Dashboard() {
                               <span className="muted">Prediction closed.</span>
                             );
                           })()}
-                          {m.winner && <span className="match-winner-badge">🏆 Winner: {getTeamCode(m.winner, teams)}</span>}
+                          {m.winner && (
+                            <span className="match-winner-badge">
+                              {isDrawOrCancelledWinner(m.winner)
+                                ? `🏁 Result: ${getMatchResultLabel(m, getTeamCode, teams)}`
+                                : `🏆 Winner: ${getTeamCode(m.winner, teams)}`}
+                            </span>
+                          )}
                         </div>
                       )}
                     </li>
@@ -2249,31 +2338,42 @@ export default function Dashboard() {
               <button type="button" className="modal-close" onClick={() => setShowParticipatedModal(false)} aria-label="Close">&times;</button>
             </div>
             {(() => {
-              const participated = sortMatchesChronological(
+              const participatedChrono = sortMatchesChronological(
                 allMatches.filter(m => savedMatchIds.has(String(m.id)))
               );
-              return participated.length === 0 ? (
+              const displayed = [...participatedChrono].reverse();
+              return participatedChrono.length === 0 ? (
                 <p className="muted">No participated matches yet.</p>
               ) : (
-                <ul className="points-history-list">
-                  {participated.map((m) => {
-                    const predicted = savedPredictions[String(m.id)] ?? savedPredictions[m.id] ?? '';
-                    const isCompleted = (m.status || '').toLowerCase() === 'completed' && (m.winner || '').trim();
-                    return (
-                      <li key={m.id} className="points-history-item">
-                        <span className="points-history-match">
-                          #{m.matchNumber || m.id} {getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)} ({m.date})
-                        </span>
-                        <span className="points-history-detail">
-                          Predicted: <strong>{getTeamCode(predicted, teams) || predicted || '—'}</strong>
-                          {isCompleted && (
-                            <span className="muted"> · Winner: {getTeamCode(m.winner, teams) || m.winner}</span>
-                          )}
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ul>
+                <>
+                  <p className="muted" style={{ marginBottom: '0.75rem', fontSize: '0.9rem' }}>
+                    Latest matches first.
+                  </p>
+                  <div className="points-history-scroll">
+                    <ul className="points-history-list">
+                      {displayed.map((m) => {
+                        const predicted = savedPredictions[String(m.id)] ?? savedPredictions[m.id] ?? '';
+                        const isCompleted = isMatchCompletedWithResult(m);
+                        return (
+                          <li key={m.id} className="points-history-item">
+                            <span className="points-history-match">
+                              #{m.matchNumber || m.id} {getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)} ({m.date})
+                            </span>
+                            <span className="points-history-detail">
+                              Predicted: <strong>{getTeamCode(predicted, teams) || predicted || '—'}</strong>
+                              {isCompleted && (
+                                <span className="muted">
+                                  {' '}
+                                  · Result: {getMatchResultLabel(m, getTeamCode, teams)}
+                                </span>
+                              )}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                </>
               );
             })()}
           </div>

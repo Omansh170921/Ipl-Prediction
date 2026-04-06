@@ -6,8 +6,6 @@ import {
   deleteUser,
   onAuthStateChanged,
   updatePassword,
-  reauthenticateWithCredential,
-  EmailAuthProvider,
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, query, where, getDocs, runTransaction } from 'firebase/firestore';
 import { auth, db, callFunction } from '../firebase/config';
@@ -180,11 +178,11 @@ export function AuthProvider({ children }) {
     }
   };
 
-  const changePassword = async (currentPassword, newPassword) => {
+  const changePassword = async (newPassword) => {
     if (!user) throw new Error('Not logged in');
-    const credential = EmailAuthProvider.credential(user.email, currentPassword);
-    await reauthenticateWithCredential(user, credential);
-    await updatePassword(user, newPassword);
+    const pwd = (newPassword || '').trim();
+    if (pwd.length < 6) throw new Error('Password must be at least 6 characters');
+    await updatePassword(user, pwd);
     return { success: true };
   };
 

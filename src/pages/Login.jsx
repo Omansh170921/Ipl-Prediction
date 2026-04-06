@@ -87,7 +87,6 @@ export default function Login() {
         </form>
         <div className="auth-links">
           <Link to="/admin-login">Admin Login</Link>
-          <Link to="/login-password">Change Password / Forgot Password</Link>
         </div>
         <p className="auth-footer">
           New user? <Link to="/register">Register</Link>
