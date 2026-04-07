@@ -564,6 +564,40 @@ button.stat-card.stat-card-clickable.stat-card--predicted:hover {
   box-shadow: 0 2px 10px rgba(13, 148, 136, 0.22);
 }
 
+/* Win/loss/draw-cancel/missed — four-part summary (matches results modal) */
+.stat-card.stat-card--win-loss {
+  background: linear-gradient(180deg, rgba(185, 28, 28, 0.06) 0%, rgba(255, 255, 255, 0.95) 100%);
+  border: 1px solid rgba(185, 28, 28, 0.28);
+}
+
+.stat-card.stat-card--win-loss .stat-value {
+  color: #991b1b;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-card.stat-card--win-loss .stat-value.stat-value--compact {
+  font-size: 1.2rem;
+  line-height: 1.25;
+  word-break: break-word;
+}
+
+.stat-card.stat-card--win-loss .stat-label {
+  color: #7f1d1d;
+  font-weight: 600;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+button.stat-card.stat-card-clickable.stat-card--win-loss {
+  background: linear-gradient(180deg, rgba(185, 28, 28, 0.06) 0%, rgba(255, 255, 255, 0.95) 100%);
+  border: 1px solid rgba(185, 28, 28, 0.28);
+}
+
+button.stat-card.stat-card-clickable.stat-card--win-loss:hover {
+  border-color: #dc2626;
+  box-shadow: 0 2px 10px rgba(220, 38, 38, 0.18);
+}
+
 .points-history-scroll {
   max-height: min(60vh, 28rem);
   overflow-y: auto;

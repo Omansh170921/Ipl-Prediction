@@ -70,6 +70,18 @@ function sortMatchesDescending(list) {
 }
 
 /**
+ * Match history list order. Single-date filter: newest first (unchanged).
+ * All dates: incomplete matches first (ascending schedule), then completed matches (ascending).
+ */
+function sortHistoryMatchesForDisplay(list, allDatesMode) {
+  if (!list || list.length === 0) return [];
+  if (!allDatesMode) return sortMatchesDescending(list);
+  const incomplete = list.filter((m) => !isMatchCompletedWithResult(m));
+  const complete = list.filter((m) => isMatchCompletedWithResult(m));
+  return [...sortMatchesChronological(incomplete), ...sortMatchesChronological(complete)];
+}
+
+/**
  * Last completed match day strictly before the selected date (for “previous” rank).
  * If no date is selected (“All dates”), the boundary is the final completed day, so “previous”
  * means standings through the last match before that final day.
@@ -458,7 +470,7 @@ export default function Dashboard() {
       label: `${m.matchNumber || (i + 1)} - ${getTeamCode(m.team1, teams)} vs ${getTeamCode(m.team2, teams)}`,
     }));
   const historyMatchList = matchFilterDate ? dateFilteredMatches : allMatches;
-  const matchOptionsHistory = sortMatchesDescending(historyMatchList)
+  const matchOptionsHistory = sortHistoryMatchesForDisplay(historyMatchList, !matchFilterDate)
     .map((m, i) => ({
       id: m.id,
       label: `${m.matchNumber || (i + 1)} - ${getTeamCode(m.team1, teams)} vs ${getTeamCode(m.team2, teams)}`,
@@ -510,7 +522,7 @@ export default function Dashboard() {
     allMatches.length
   );
   const historyMatchesFiltered = historyMatchesRaw;
-  const historyMatches = sortMatchesDescending(historyMatchesFiltered);
+  const historyMatches = sortHistoryMatchesForDisplay(historyMatchesFiltered, !matchFilterDate);
 
   useEffect(() => {
     const focusMatchId = searchParams.get('focusMatch');
@@ -1044,6 +1056,9 @@ export default function Dashboard() {
                 return (pred || '').toString().toLowerCase().trim() === (m.winner || '').toLowerCase().trim();
               }).length;
               const losses = completedParticipatedTeam.length - wins;
+              const drawCancelledParticipated = completedMatches.filter(
+                (m) => savedMatchIds.has(String(m.id)) && !hasTeamWinnerForScoring(m)
+              ).length;
               const nonPrediction = completedMatches.length - completedParticipated.length;
               const totalPoints = leaderboard.find(u => u.id === user?.uid)?.points ??
                 completedMatches.reduce((sum, m) => sum + (m.pointResults?.[user?.uid] ?? 0), 0);
@@ -1073,12 +1088,14 @@ export default function Dashboard() {
                 </button>
                 <button
                   type="button"
-                  className="stat-card stat-card-clickable"
+                  className="stat-card stat-card-clickable stat-card--win-loss"
                   onClick={() => setShowWinsLossesModal(true)}
-                  title="See wins, losses, and completed matches where you had no prediction"
+                  title="Wins and losses when a team won; draw/cancelled when you predicted but there was no team winner; missed = finished matches with no saved prediction"
                 >
-                  <span className="stat-value">{wins} / {losses} / {nonPrediction}</span>
-                  <span className="stat-label">Wins / losses / missed</span>
+                  <span className="stat-value stat-value--compact">
+                    {wins} / {losses} / {drawCancelledParticipated} / {nonPrediction}
+                  </span>
+                  <span className="stat-label">Win / loss / draw·cancel / missed</span>
                 </button>
                 <button
                   type="button"
