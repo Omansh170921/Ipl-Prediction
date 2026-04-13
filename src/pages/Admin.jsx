@@ -213,6 +213,8 @@ export default function Admin() {
   const [usersFetchError, setUsersFetchError] = useState(null);
   const [pendingQuestions, setPendingQuestions] = useState([]);
   const [questionsAwaitingAnswer, setQuestionsAwaitingAnswer] = useState([]);
+  /** Approved questions with a correct answer already set (admin may change answer and reconcile points). */
+  const [answeredInsightQuestions, setAnsweredInsightQuestions] = useState([]);
   const [insightApprovalLoading, setInsightApprovalLoading] = useState(false);
   const [approvingQid, setApprovingQid] = useState(null);
   const [rejectingQid, setRejectingQid] = useState(null);
@@ -402,7 +404,7 @@ export default function Admin() {
       if (activeSection !== 'matches') return;
       setInsightApprovalLoading(true);
       try {
-        const [pendingSnap, awaitingSnap] = await Promise.all([
+        const [pendingSnap, awaitingSnap, answeredSnap] = await Promise.all([
           getDocs(query(
             collection(db, 'cricket_questions'),
             where('approved', '==', false),
@@ -413,9 +415,15 @@ export default function Admin() {
             where('approved', '==', true),
             where('correctAnswer', '==', null)
           )),
+          getDocs(query(
+            collection(db, 'cricket_questions'),
+            where('approved', '==', true),
+            where('status', '==', 'answered')
+          )),
         ]);
         setPendingQuestions(pendingSnap.docs.map(d => ({ id: d.id, ...d.data() })));
         setQuestionsAwaitingAnswer(awaitingSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+        setAnsweredInsightQuestions(answeredSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       } catch (err) {
         console.error('Fetch insight questions error:', err);
         setMessage('Error loading questions: ' + (err.message || ''));
@@ -550,8 +558,32 @@ export default function Admin() {
     else setCorrectAnswerInput('');
   };
 
-  const handleSetCorrectAnswer = async (e) => {
+  const openChangeAnswerModal = (q) => {
+    setAnswerModalQuestion(q);
+    const cur = String(q.correctAnswer ?? '').trim();
+    if (cur) setCorrectAnswerInput(cur);
+    else if (q.type === 'yesno') setCorrectAnswerInput('Yes');
+    else if (q.type === 'multiple' && (q.options || []).length > 0) setCorrectAnswerInput((q.options || [])[0] || '');
+    else setCorrectAnswerInput('');
+  };
+
+  const handleCorrectAnswerFormSubmit = async (e) => {
     e.preventDefault();
+    const q = answerModalQuestion;
+    if (!q || !correctAnswerInput.trim()) {
+      setMessage('Please enter the correct answer');
+      return;
+    }
+    const hasExisting =
+      q.correctAnswer != null && String(q.correctAnswer).trim() !== '';
+    if (hasExisting) {
+      await handleUpdateCorrectAnswer();
+    } else {
+      await handleSetCorrectAnswerFirstTime();
+    }
+  };
+
+  const handleSetCorrectAnswerFirstTime = async () => {
     const q = answerModalQuestion;
     if (!q || !correctAnswerInput.trim()) {
       setMessage('Please enter the correct answer');
@@ -580,15 +612,91 @@ export default function Admin() {
         if (Object.keys(updates).length > 0) {
           await updateDoc(doc(db, 'matches', matchId), updates);
         }
-      } else {
-        setMessage('Question has no matchId. Points not awarded.');
       }
+      const trimmed = correctAnswerInput.trim();
+      let msg = `Correct answer set. ${winners.length} user(s) who answered correctly awarded +1 insight point.`;
+      if (!matchId) msg += ' Warning: no matchId — points were not saved on the match.';
+      setMessage(msg);
       setAnswerModalQuestion(null);
       setCorrectAnswerInput('');
-      setMessage(`Correct answer set. ${winners.length} user(s) who answered correctly awarded +1 insight point${matchId ? '' : ' (no matchId)'}.`);
       setQuestionsAwaitingAnswer(prev => prev.filter(p => p.id !== q.id));
+      setAnsweredInsightQuestions((prev) => [
+        ...prev.filter((p) => p.id !== q.id),
+        {
+          ...q,
+          correctAnswer: trimmed,
+          status: 'answered',
+          answeredAt: new Date().toISOString(),
+        },
+      ]);
     } catch (err) {
       setMessage('Error setting answer: ' + (err.message || ''));
+    }
+    setSubmittingAnswer(false);
+  };
+
+  /** Adjust match insightPointResults when admin changes the official correct answer (+1 / −1 per affected user). */
+  const handleUpdateCorrectAnswer = async () => {
+    const q = answerModalQuestion;
+    if (!q || !correctAnswerInput.trim()) {
+      setMessage('Please enter the correct answer');
+      return;
+    }
+    const oldAns = String(q.correctAnswer ?? '').trim();
+    const newAns = correctAnswerInput.trim();
+    if (oldAns === newAns) {
+      setMessage('The correct answer is unchanged.');
+      setAnswerModalQuestion(null);
+      return;
+    }
+    if (
+      !window.confirm(
+        'Update the correct answer? Match insight points will change by +1 or −1 for each player whose answer now matches or no longer matches the official answer.'
+      )
+    ) {
+      return;
+    }
+    setSubmittingAnswer(true);
+    try {
+      const answersSnap = await getDocs(
+        query(collection(db, 'cricket_answers'), where('questionId', '==', q.id))
+      );
+      const oldNorm = oldAns.toLowerCase();
+      const newNorm = newAns.toLowerCase();
+      const matchId = q.matchId;
+      const updates = {};
+      answersSnap.docs.forEach((d) => {
+        const a = d.data();
+        const uid = a.userId;
+        if (!uid) return;
+        const ansNorm = String(a.answer || '').trim().toLowerCase();
+        const wasRight = ansNorm === oldNorm;
+        const nowRight = ansNorm === newNorm;
+        const delta = (nowRight ? 1 : 0) - (wasRight ? 1 : 0);
+        if (delta !== 0) updates[`insightPointResults.${uid}`] = increment(delta);
+      });
+      await updateDoc(doc(db, 'cricket_questions', q.id), {
+        correctAnswer: newAns,
+        correctAnswerUpdatedAt: new Date().toISOString(),
+      });
+      if (matchId && Object.keys(updates).length > 0) {
+        await updateDoc(doc(db, 'matches', matchId), updates);
+      }
+      const n = Object.keys(updates).length;
+      setAnswerModalQuestion(null);
+      setCorrectAnswerInput('');
+      setMessage(
+        n > 0
+          ? `Correct answer updated. Adjusted insight points for ${n} user(s) on the match.`
+          : 'Correct answer updated. No insight point changes (no answers matched differently).'
+      );
+      setAnsweredInsightQuestions((prev) =>
+        prev.map((p) =>
+          p.id === q.id ? { ...p, correctAnswer: newAns, correctAnswerUpdatedAt: new Date().toISOString() } : p
+        )
+      );
+    } catch (err) {
+      setMessage('Error updating answer: ' + (err.message || ''));
     }
     setSubmittingAnswer(false);
   };
@@ -617,6 +725,7 @@ export default function Admin() {
       setMessage('Question removed.');
       setPendingQuestions(prev => prev.filter(p => p.id !== q.id));
       setQuestionsAwaitingAnswer(prev => prev.filter(p => p.id !== q.id));
+      setAnsweredInsightQuestions(prev => prev.filter(p => p.id !== q.id));
     } catch (err) {
       setMessage('Error removing: ' + (err.message || ''));
     }
@@ -2390,7 +2499,9 @@ export default function Admin() {
                   {matches.map((m) => {
                     const matchPending = pendingQuestions.filter(q => q.matchId === m.id);
                     const matchAwaiting = questionsAwaitingAnswer.filter(q => q.matchId === m.id);
-                    const hasInsights = matchPending.length > 0 || matchAwaiting.length > 0;
+                    const matchAnswered = answeredInsightQuestions.filter(q => q.matchId === m.id);
+                    const hasInsights =
+                      matchPending.length > 0 || matchAwaiting.length > 0 || matchAnswered.length > 0;
                     const isInsightExpanded = expandedInsightMatchId === m.id;
                     return (
                     <div key={m.id} className="match-row">
@@ -2469,7 +2580,9 @@ export default function Admin() {
                             title="Insight approval (visible to admin only)"
                             aria-label="Insight approval"
                           >
-                            <span className="btn-insight-count">{matchPending.length + matchAwaiting.length}</span>
+                            <span className="btn-insight-count">
+                              {matchPending.length + matchAwaiting.length + matchAnswered.length}
+                            </span>
                             💡
                           </button>
                         )}
@@ -2524,6 +2637,63 @@ export default function Admin() {
                                         </div>
                                       </li>
                                     );
+                                    })}
+                                  </ul>
+                                </div>
+                              )}
+                              {matchAnswered.length > 0 && (
+                                <div className="insight-subsection">
+                                  <h4>Correct answer set (change if needed)</h4>
+                                  <p className="muted" style={{ marginBottom: '0.5rem', fontSize: '0.9rem' }}>
+                                    Changing the official answer updates stored insight points on the match (+1 / −1 per affected player).
+                                  </p>
+                                  <ul className="rules-list">
+                                    {matchAnswered.map((q) => {
+                                      const ab = Array.isArray(q.approvedBy) ? q.approvedBy : [];
+                                      const ca = String(q.correctAnswer ?? '').trim();
+                                      return (
+                                        <li key={q.id} className="insight-pending-item">
+                                          <div className="insight-pending-content">
+                                            <strong>{q.question}</strong>
+                                            <span className="muted"> · {q.type === 'yesno' ? 'Yes/No' : q.type === 'multiple' ? 'Multiple Choice' : 'Text'}</span>
+                                            <p className="muted" style={{ margin: '0.35rem 0 0 0' }}>
+                                              Current answer: <strong>{ca || '—'}</strong>
+                                            </p>
+                                            {(q.options || []).length > 0 && (
+                                              <p className="muted" style={{ margin: '0.25rem 0 0 0', fontSize: '0.9em' }}>
+                                                Options: {q.options.join(', ')}
+                                              </p>
+                                            )}
+                                            <p className="muted" style={{ margin: '0.35rem 0 0 0', fontSize: '0.9em' }}>
+                                              Raised by: <strong>{formatInsightUserLabel(allUsers, q.createdBy)}</strong>
+                                              {ab.length > 0 && (
+                                                <> · Approved by: {ab.map((uid) => formatInsightUserLabel(allUsers, uid)).join(', ')}</>
+                                              )}
+                                            </p>
+                                          </div>
+                                          <div className="insight-pending-actions">
+                                            <button
+                                              type="button"
+                                              className="btn btn-sm btn-secondary"
+                                              onClick={() => openChangeAnswerModal(q)}
+                                              disabled={submittingAnswer}
+                                              title="Change the official correct answer"
+                                            >
+                                              Change answer
+                                            </button>
+                                            <button
+                                              type="button"
+                                              className="btn btn-sm btn-icon-only"
+                                              onClick={() => handleRemoveQuestion(q)}
+                                              disabled={removingQid === q.id}
+                                              title={removingQid === q.id ? 'Removing...' : 'Permanently delete question'}
+                                              aria-label="Remove"
+                                            >
+                                              {removingQid === q.id ? '⋯' : '🗑️'}
+                                            </button>
+                                          </div>
+                                        </li>
+                                      );
                                     })}
                                   </ul>
                                 </div>
@@ -2587,7 +2757,9 @@ export default function Admin() {
                                   </ul>
                                 </div>
                               )}
-                              {matchPending.length === 0 && matchAwaiting.length === 0 && (
+                              {matchPending.length === 0 &&
+                                matchAwaiting.length === 0 &&
+                                matchAnswered.length === 0 && (
                                 <p className="no-matches">No insight questions for this match.</p>
                               )}
                             </>
@@ -2816,11 +2988,20 @@ export default function Admin() {
               <div className="modal-overlay" onClick={() => !submittingAnswer && setAnswerModalQuestion(null)}>
                 <div className="modal-content" onClick={e => e.stopPropagation()}>
                   <div className="modal-header">
-                    <h3>Set Correct Answer (after match completes)</h3>
+                    <h3>
+                      {answerModalQuestion.correctAnswer != null && String(answerModalQuestion.correctAnswer).trim() !== ''
+                        ? 'Change correct answer'
+                        : 'Set correct answer (after match completes)'}
+                    </h3>
                     <button type="button" className="modal-close" onClick={() => !submittingAnswer && setAnswerModalQuestion(null)} aria-label="Close">&times;</button>
                   </div>
                   <p className="muted">{answerModalQuestion.question}</p>
-                  <form onSubmit={handleSetCorrectAnswer}>
+                  {answerModalQuestion.correctAnswer != null && String(answerModalQuestion.correctAnswer).trim() !== '' && (
+                    <p className="muted" style={{ marginTop: '0.35rem' }}>
+                      Current official answer: <strong>{String(answerModalQuestion.correctAnswer).trim()}</strong>
+                    </p>
+                  )}
+                  <form onSubmit={handleCorrectAnswerFormSubmit}>
                     <div className="form-group">
                       <label>Correct Answer</label>
                       {answerModalQuestion.type === 'yesno' && (
@@ -2848,7 +3029,12 @@ export default function Admin() {
                     </div>
                     <div className="modal-actions">
                       <button type="submit" className="btn btn-primary" disabled={submittingAnswer}>
-                        {submittingAnswer ? 'Submitting...' : 'Submit Answer & Award Points'}
+                        {submittingAnswer
+                          ? 'Submitting...'
+                          : answerModalQuestion.correctAnswer != null &&
+                              String(answerModalQuestion.correctAnswer).trim() !== ''
+                            ? 'Save & reconcile insight points'
+                            : 'Submit answer & award points'}
                       </button>
                       <button type="button" className="btn btn-secondary" onClick={() => setAnswerModalQuestion(null)} disabled={submittingAnswer}>Cancel</button>
                     </div>

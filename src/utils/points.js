@@ -73,6 +73,19 @@ export function calculateMatchPoints(match, allUsers, matchPredictions, pointRul
 }
 
 /**
+ * Points each correct predictor would get if hypotheticalWinner wins the match,
+ * using the same pool rules as calculateMatchPoints and current saved predictions.
+ */
+export function expectedPointsIfWinner(match, allUsers, matchPredictions, pointRules, hypotheticalWinner) {
+  const hw = (hypotheticalWinner || '').trim();
+  if (!hw || !Array.isArray(allUsers) || allUsers.length === 0) return null;
+  const fakeMatch = { ...match, winner: hw };
+  const { summary } = calculateMatchPoints(fakeMatch, allUsers, matchPredictions, pointRules);
+  if (!summary || summary.pointsPerWinner == null) return null;
+  return to2Decimals(summary.pointsPerWinner);
+}
+
+/**
  * Calculate leaderboard (total points per user) across all completed matches.
  * Uses stored pointResults when available, otherwise calculates on the fly.
  */

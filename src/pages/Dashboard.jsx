@@ -10,7 +10,7 @@ import { db } from '../firebase/config';
 import Sidebar from '../components/Sidebar';
 import { toInitCap } from '../utils/format';
 import { getAppTodayDate } from '../utils/calendarDate';
-import { calculateLeaderboard, to2Decimals } from '../utils/points';
+import { calculateLeaderboard, expectedPointsIfWinner, to2Decimals } from '../utils/points';
 import { isPredictionEligible, shouldShowCrowdPrediction } from '../utils/match';
 import { getPredictionSavedIso, formatTimeHH24 } from '../utils/predictionTime';
 import {
@@ -408,6 +408,8 @@ export default function Dashboard() {
   const [crowdPredictionsByMatch, setCrowdPredictionsByMatch] = useState({});
   /** Non-admin user count; used for “did not predict” % (null = not loaded yet). */
   const [participatingUserCount, setParticipatingUserCount] = useState(null);
+  /** Same non-admin users as leaderboard pool; used for expected winner points beside crowd %. */
+  const [participatingUsersForScoring, setParticipatingUsersForScoring] = useState(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const today = getAppTodayDate();
 
@@ -678,9 +680,10 @@ export default function Dashboard() {
     let cancelled = false;
     (async () => {
       try {
-        const [allPredSnap, usersSnap] = await Promise.all([
+        const [allPredSnap, usersSnap, ptSnap] = await Promise.all([
           getDocs(collection(db, 'predictions')),
           getDocs(collection(db, 'users')).catch(() => ({ docs: [] })),
+          getDoc(doc(db, 'rules', 'pointRules')),
         ]);
         if (cancelled) return;
         const nonAdmin = (usersSnap?.docs || []).filter(d => {
@@ -688,6 +691,10 @@ export default function Dashboard() {
           return !u.isAdmin && u.isAdmin !== 'true';
         });
         setParticipatingUserCount(nonAdmin.length);
+        setParticipatingUsersForScoring(nonAdmin.map(d => ({ id: d.id, ...d.data() })));
+        if (ptSnap?.exists()) {
+          setPointRules(ptSnap.data());
+        }
         const byMatchCrowd = {};
         allPredSnap.docs.forEach(d => {
           const data = d.data();
@@ -705,6 +712,7 @@ export default function Dashboard() {
         if (!cancelled) {
           setCrowdPredictionsByMatch({});
           setParticipatingUserCount(null);
+          setParticipatingUsersForScoring(null);
         }
       }
     })();
@@ -929,7 +937,8 @@ export default function Dashboard() {
   };
 
   const renderCrowdMatchStats = (match) => {
-    const stats = getCrowdPredictionStats(match, crowdPredictionsByMatch[String(match.id)], participatingUserCount);
+    const predsForMatch = crowdPredictionsByMatch[String(match.id)] || [];
+    const stats = getCrowdPredictionStats(match, predsForMatch, participatingUserCount);
     if (!stats) {
       return (
         <div className="match-crowd-predictions">
@@ -941,9 +950,18 @@ export default function Dashboard() {
     const code1 = getTeamCode(match.team1, teams);
     const code2 = getTeamCode(match.team2, teams);
     const noPred = stats.noPredictionCount ?? 0;
+    const canShowExpectedPts =
+      Array.isArray(participatingUsersForScoring) && participatingUsersForScoring.length > 0;
+    const expIfTeam1Wins = canShowExpectedPts
+      ? expectedPointsIfWinner(match, participatingUsersForScoring, predsForMatch, pointRules, match.team1)
+      : null;
+    const expIfTeam2Wins = canShowExpectedPts
+      ? expectedPointsIfWinner(match, participatingUsersForScoring, predsForMatch, pointRules, match.team2)
+      : null;
+    const fmtExp = (v) => (v != null ? ` (+${v})` : '');
     const aria = [
-      `${code1} ${stats.team1Pct}% (${stats.c1})`,
-      `${code2} ${stats.team2Pct}% (${stats.c2})`,
+      `${code1} ${stats.team1Pct}%${fmtExp(expIfTeam1Wins)} (${stats.c1})`,
+      `${code2} ${stats.team2Pct}%${fmtExp(expIfTeam2Wins)} (${stats.c2})`,
       stats.other > 0 ? `other ${stats.otherPct}% (${stats.other})` : null,
       noPred > 0 ? `no prediction ${stats.noPredictionPct}% (${noPred})` : null,
     ].filter(Boolean).join(', ');
@@ -960,8 +978,34 @@ export default function Dashboard() {
           {noPred > 0 && <span className="prediction-split-seg prediction-split-no-pred" style={{ flex: noPred }} />}
         </div>
         <div className="prediction-split-legend">
-          <span><span className="legend-dot legend-dot-t1" aria-hidden /> {code1} <strong>{stats.team1Pct}%</strong> <span className="muted">({stats.c1})</span></span>
-          <span><span className="legend-dot legend-dot-t2" aria-hidden /> {code2} <strong>{stats.team2Pct}%</strong> <span className="muted">({stats.c2})</span></span>
+          <span>
+            <span className="legend-dot legend-dot-t1" aria-hidden /> {code1}{' '}
+            <strong>{stats.team1Pct}%</strong>
+            {expIfTeam1Wins != null && (
+              <span
+                className="crowd-expected-pts"
+                title="Points each correct predictor gets if this team wins (from current picks and scoring rules)"
+              >
+                {' '}
+                (+{expIfTeam1Wins})
+              </span>
+            )}{' '}
+            <span className="muted">({stats.c1})</span>
+          </span>
+          <span>
+            <span className="legend-dot legend-dot-t2" aria-hidden /> {code2}{' '}
+            <strong>{stats.team2Pct}%</strong>
+            {expIfTeam2Wins != null && (
+              <span
+                className="crowd-expected-pts"
+                title="Points each correct predictor gets if this team wins (from current picks and scoring rules)"
+              >
+                {' '}
+                (+{expIfTeam2Wins})
+              </span>
+            )}{' '}
+            <span className="muted">({stats.c2})</span>
+          </span>
           {stats.other > 0 && <span className="muted">Other {stats.otherPct}% ({stats.other})</span>}
           {noPred > 0 && (
             <span className="muted">

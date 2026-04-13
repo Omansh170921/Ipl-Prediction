@@ -1613,6 +1613,11 @@ button.stat-card.stat-card-clickable.stat-card--win-loss:hover {
   font-size: 0.8rem;
 }
 
+.crowd-expected-pts {
+  font-weight: 600;
+  color: var(--text);
+}
+
 .prediction-split-bar {
   display: flex;
   width: 100%;
