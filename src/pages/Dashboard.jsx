@@ -482,6 +482,8 @@ export default function Dashboard() {
   /** Same non-admin users as leaderboard pool; used for expected winner points beside crowd %. */
   const [participatingUsersForScoring, setParticipatingUsersForScoring] = useState(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  /** Active prediction contexts where the user saved picks (Firestore responses); not tied to admin scoring. */
+  const [challengeParticipatedCount, setChallengeParticipatedCount] = useState(null);
   const today = getAppTodayDate();
 
   useEffect(() => {
@@ -826,6 +828,34 @@ export default function Dashboard() {
     };
     fetchLeaderboard();
   }, [user, activeSection, leaderboardRefresh]);
+
+  useEffect(() => {
+    if (!user?.uid || activeSection !== 'dashboard') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDocs(collection(db, 'prediction_contexts'));
+        const activeIds = snap.docs
+          .filter((d) => d.data().active === true)
+          .map((d) => d.id);
+        const results = await Promise.all(
+          activeIds.map((id) => getDoc(doc(db, 'prediction_contexts', id, 'responses', user.uid)))
+        );
+        const n = results.filter((rs) => {
+          if (!rs.exists()) return false;
+          const ids = rs.data().selectedTeamIds;
+          return Array.isArray(ids) && ids.length > 0;
+        }).length;
+        if (!cancelled) setChallengeParticipatedCount(n);
+      } catch (e) {
+        console.error(e);
+        if (!cancelled) setChallengeParticipatedCount(0);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.uid, activeSection, leaderboardRefresh]);
 
   useEffect(() => {
     if (!leaderboardRawData) return;
@@ -1186,6 +1216,8 @@ export default function Dashboard() {
                 seasonLbMap && typeof seasonLbMap === 'object'
                   ? Object.keys(seasonLbMap).length
                   : 0;
+              const joinedChallengeCount =
+                typeof challengeParticipatedCount === 'number' ? challengeParticipatedCount : null;
               const seasonChallengePointsTotal = sumSeasonContestLeaderboardPoints(meLbUserOverview || {});
               return (
                 <div className="dashboard-stats">
@@ -1235,7 +1267,7 @@ export default function Dashboard() {
                   title={
                     leaderboardLoading
                       ? 'Loading challenge summary'
-                      : `Scored challenges: ${scoredChallengeCount}, points total: ${seasonChallengePointsTotal} (included in total points above)`
+                      : `Joined ${joinedChallengeCount ?? '…'} active challenge(s); ${scoredChallengeCount} scored by admin. Points total: ${seasonChallengePointsTotal} (included in total points above).`
                   }
                 >
                   <span className="stat-value stat-value--stacked">
@@ -1248,7 +1280,11 @@ export default function Dashboard() {
                     </span>
                     {!leaderboardLoading && (
                       <span className="stat-value-challenge-count">
-                        {scoredChallengeCount} challenge{scoredChallengeCount === 1 ? '' : 's'} with points
+                        {joinedChallengeCount === null
+                          ? '…'
+                          : `${joinedChallengeCount} joined`}
+                        {' · '}
+                        {scoredChallengeCount} scored
                       </span>
                     )}
                   </span>
