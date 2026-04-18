@@ -481,6 +481,25 @@ body {
   font-size: 1.25rem;
 }
 
+.prediction-context-deadline {
+  color: var(--error);
+  font-weight: 600;
+  font-style: normal;
+}
+
+.prediction-context-deadline strong {
+  color: var(--error);
+  font-weight: 700;
+}
+
+p.prediction-context-points-tiers,
+p.muted.prediction-context-points-tiers,
+.prediction-context-card-meta.prediction-context-points-tiers {
+  color: var(--cricket-green);
+  font-weight: 600;
+  font-style: normal;
+}
+
 .challenge-points-embedded {
   margin-top: 1.75rem;
   padding-top: 1.25rem;

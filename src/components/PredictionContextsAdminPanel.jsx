@@ -826,13 +826,13 @@ export default function PredictionContextsAdminPanel({ teams, allUsers = [], set
                       <p className="prediction-context-card-meta">
                         <strong>{maxSel}</strong> picks per player
                         {c.deadline && (
-                          <>
+                          <span className="prediction-context-deadline">
                             {' '}
                             · Deadline <strong>{formatContextDeadlineDisplay(c.deadline)}</strong>
-                          </>
+                          </span>
                         )}
                       </p>
-                      <p className="prediction-context-card-meta">
+                      <p className="prediction-context-card-meta prediction-context-points-tiers">
                         Points:{' '}
                         {(normalizeContextTiers(c.tiers) || [])
                           .map((t) => `${t.correctCount} right → ${t.points} pts`)

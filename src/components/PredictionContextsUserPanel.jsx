@@ -270,10 +270,13 @@ export default function PredictionContextsUserPanel({ user, teams }) {
               <p className="muted" style={{ fontSize: '0.9rem' }}>
                 Pick exactly <strong>{max}</strong> team(s).
                 {c.deadline && (
-                  <> Deadline: <strong>{formatContextDeadlineDisplay(c.deadline)}</strong></>
+                  <span className="prediction-context-deadline">
+                    {' '}
+                    Deadline: <strong>{formatContextDeadlineDisplay(c.deadline)}</strong>
+                  </span>
                 )}
               </p>
-              <p className="muted" style={{ fontSize: '0.85rem' }}>
+              <p className="muted prediction-context-points-tiers" style={{ fontSize: '0.85rem' }}>
                 Points:{' '}
                 {normalizeContextTiers(c.tiers)
                   .map((t) => `${t.correctCount} right → ${t.points} pts`)
