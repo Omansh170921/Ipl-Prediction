@@ -526,7 +526,7 @@ export default function PredictionContextsAdminPanel({ teams, allUsers = [], set
   const handleClearContestWinners = async (c) => {
     if (
       !window.confirm(
-        `Clear winners for “${c.title}”? This removes the published winner list and removes this challenge’s leaderboard points from every user who submitted picks (responses are unchanged — run “Score all” again if you need to refresh points).`
+        `Clear winners for “${c.title}”? This removes the published winner list, strips scored points for this challenge from every user’s leaderboard and point history, and clears earned points on each submission (team picks stay saved). Run “Score all” again when you want points back.`
       )
     )
       return;
@@ -534,6 +534,24 @@ export default function PredictionContextsAdminPanel({ teams, allUsers = [], set
     try {
       const respSnap = await getDocs(collection(db, 'prediction_contexts', c.id, 'responses'));
       const uids = respSnap.docs.map((d) => d.id);
+
+      let rb = writeBatch(db);
+      let rn = 0;
+      for (const d of respSnap.docs) {
+        rb.update(d.ref, {
+          correctCount: deleteField(),
+          pointsAwarded: deleteField(),
+          scoredAt: deleteField(),
+        });
+        rn += 1;
+        if (rn >= 400) {
+          await rb.commit();
+          rb = writeBatch(db);
+          rn = 0;
+        }
+      }
+      if (rn > 0) await rb.commit();
+
       const userSnaps = await Promise.all(uids.map((uid) => getDoc(doc(db, 'users', uid))));
       let ub = writeBatch(db);
       let un = 0;
@@ -561,7 +579,7 @@ export default function PredictionContextsAdminPanel({ teams, allUsers = [], set
       });
       const skipped = uids.length - usersUpdated;
       setMessage(
-        `Winner list cleared. Removed this challenge’s leaderboard points for ${usersUpdated} user profile(s).` +
+        `Winner list and scored points cleared (${respSnap.size} submission(s) updated). Removed this challenge from ${usersUpdated} user profile(s) for leaderboard / point history.` +
           (skipped ? ` ${skipped} response(s) had no user document.` : '')
       );
       await loadContexts();
@@ -952,9 +970,9 @@ export default function PredictionContextsAdminPanel({ teams, allUsers = [], set
                         every player already came from Step 2 (correct picks); this step does not change totals.
                       </p>
                       <p className="muted" style={{ fontSize: '0.82rem', margin: '0 0 0.75rem 0' }}>
-                        <strong>Clear winners</strong> removes that list and strips this challenge from the main leaderboard for{' '}
-                        <em>all</em> participants who saved picks (response docs are unchanged; use <strong>Score all</strong>{' '}
-                        again to re-apply points).
+                        <strong>Clear winners</strong> removes the winner list, clears this challenge’s points from the main
+                        leaderboard and prediction point history, and removes earned points from the participant view — team
+                        picks stay saved. Use <strong>Score all</strong> again to re-apply scores.
                       </p>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
                         <button
@@ -971,7 +989,7 @@ export default function PredictionContextsAdminPanel({ teams, allUsers = [], set
                             className="btn btn-sm btn-secondary"
                             onClick={() => handleClearContestWinners(c)}
                             disabled={saving || declaringWinnersId === c.id}
-                            title="Clears the winner list and removes this challenge’s leaderboard points for every user who submitted picks"
+                            title="Clears winners, leaderboard and point-history points, and points shown on each submission (picks kept)"
                           >
                             Clear winners
                           </button>

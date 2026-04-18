@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { collection, getDocs, doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import {
@@ -9,6 +10,8 @@ import {
 } from '../utils/predictionContext';
 import { formatContextDeadlineDisplay } from '../utils/format';
 import { formatDdMmYyyy, toInitCap } from '../utils/format';
+import { getPredictionSavedIso, formatTimeHH24 } from '../utils/predictionTime';
+import { to2Decimals } from '../utils/points';
 
 function getTeamLabel(team) {
   const code = (team?.code || '').trim();
@@ -23,6 +26,14 @@ function getTeamCodeOnly(team) {
   return (team.name || '').trim() || '—';
 }
 
+function formatParticipatedAt(iso) {
+  if (!iso) return '—';
+  const date = formatDdMmYyyy(iso);
+  const time = formatTimeHH24(iso);
+  if (!date && time === '—') return '—';
+  return time === '—' ? date : `${date} · ${time}`;
+}
+
 export default function PredictionContextsUserPanel({ user, teams }) {
   const [contexts, setContexts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -31,12 +42,10 @@ export default function PredictionContextsUserPanel({ user, teams }) {
   const [picks, setPicks] = useState({});
   /** contextId -> loaded response meta */
   const [meta, setMeta] = useState({});
-  /** contextId -> { rows: { userId, displayName, selectedTeamIds }[], error? } — only for closed contexts */
+  /** contextId -> { rows: { userId, displayName, selectedTeamIds, participatedAtIso, pointsEarned }[], error? } — post-deadline / closed */
   const [participantsByContext, setParticipantsByContext] = useState({});
-  /** { contextId, userId } whose picks are expanded */
-  const [participantPicksExpanded, setParticipantPicksExpanded] = useState(null);
-  /** contextId -> whether the participant list (closed challenges) is shown */
-  const [participantsViewOpen, setParticipantsViewOpen] = useState({});
+  /** Season challenge whose participant list is open in a modal (same pattern as match participants). */
+  const [seasonParticipantsModalContext, setSeasonParticipantsModalContext] = useState(null);
 
   const load = useCallback(async () => {
     if (!user?.uid) return;
@@ -113,10 +122,18 @@ export default function PredictionContextsUserPanel({ user, teams }) {
                   const data = docSnap.data();
                   const uid = docSnap.id;
                   const selectedTeamIds = Array.isArray(data.selectedTeamIds) ? [...data.selectedTeamIds] : [];
+                  const participatedAtIso = getPredictionSavedIso(data);
+                  const rawPts = data.pointsAwarded;
+                  const pointsEarned =
+                    rawPts != null && rawPts !== '' && !Number.isNaN(Number(rawPts))
+                      ? to2Decimals(Number(rawPts))
+                      : null;
                   return {
                     userId: uid,
                     displayName: idToDisplay[uid] || `User ${uid.slice(0, 8)}…`,
                     selectedTeamIds,
+                    participatedAtIso,
+                    pointsEarned,
                   };
                 })
                 .filter((r) => r.selectedTeamIds.length > 0)
@@ -226,11 +243,7 @@ export default function PredictionContextsUserPanel({ user, teams }) {
           const winnerIds = Array.isArray(c.contestWinnerUserIds) ? c.contestWinnerUserIds : [];
           const winnersDeclared = winnerIds.length > 0;
           const userWon = user?.uid && winnerIds.includes(user.uid);
-          const pdata = participantsByContext[c.id];
-          const picksOpenKey = participantPicksExpanded && participantPicksExpanded.contextId === c.id
-            ? participantPicksExpanded.userId
-            : null;
-          const participantsPanelOpen = participantsViewOpen[c.id] === true;
+          const participantsModalOpen = seasonParticipantsModalContext?.id === c.id;
           const hasDeadline = Boolean(c.deadline && String(c.deadline).trim());
           const showParticipantsSection =
             (hasDeadline && deadlinePass) || (!hasDeadline && closed);
@@ -241,17 +254,12 @@ export default function PredictionContextsUserPanel({ user, teams }) {
                 <div className="match-card-icons">
                   <button
                     type="button"
-                    className={`btn btn-sm btn-outline btn-icon-only ${participantsPanelOpen ? 'active' : ''}`}
-                    onClick={() =>
-                      setParticipantsViewOpen((prev) => ({
-                        ...prev,
-                        [c.id]: !prev[c.id],
-                      }))
-                    }
+                    className={`btn btn-sm btn-outline btn-icon-only ${participantsModalOpen ? 'active' : ''}`}
+                    onClick={() => setSeasonParticipantsModalContext(c)}
                     title="View participants and their picks"
                     aria-label="View participants"
-                    aria-expanded={participantsPanelOpen}
-                    aria-controls={`participants-list-${c.id}`}
+                    aria-expanded={participantsModalOpen}
+                    aria-haspopup="dialog"
                   >
                     👥
                   </button>
@@ -315,70 +323,6 @@ export default function PredictionContextsUserPanel({ user, teams }) {
                     .join(', ') || '—'}
                 </p>
               )}
-              {showParticipantsSection && participantsPanelOpen && (
-                <div className="prediction-context-participants prediction-context-participants--panel">
-                  <div className="prediction-context-participants-body" id={`participants-list-${c.id}`}>
-                      <p className="muted prediction-context-participants-hint">
-                        {hasDeadline
-                          ? 'Pick deadline has ended. Tap a name to see their team codes.'
-                          : 'Picks are closed for this challenge. Tap a name to see their team codes.'}
-                      </p>
-                      {!pdata ? (
-                        <p className="muted" style={{ margin: '0.35rem 0 0 0', fontSize: '0.88rem' }}>
-                          Loading participant list…
-                        </p>
-                      ) : pdata.error ? (
-                        <p className="prediction-context-participants-error" role="alert">
-                          {pdata.error}
-                        </p>
-                      ) : pdata.rows.length === 0 ? (
-                        <p className="muted" style={{ margin: '0.35rem 0 0 0', fontSize: '0.88rem' }}>
-                          No saved picks for this challenge.
-                        </p>
-                      ) : (
-                        <ul className="prediction-context-participants-list">
-                          {pdata.rows.map((row) => {
-                            const expanded = picksOpenKey === row.userId;
-                            return (
-                              <li key={row.userId} className="prediction-context-participant-item">
-                                <button
-                                  type="button"
-                                  className={`prediction-context-participant-toggle ${expanded ? 'is-open' : ''}`}
-                                  aria-expanded={expanded}
-                                  aria-controls={`picks-${c.id}-${row.userId}`}
-                                  onClick={() =>
-                                    setParticipantPicksExpanded((cur) =>
-                                      cur?.contextId === c.id && cur?.userId === row.userId
-                                        ? null
-                                        : { contextId: c.id, userId: row.userId }
-                                    )
-                                  }
-                                >
-                                  <span className="prediction-context-participant-name">{row.displayName}</span>
-                                  <span className="prediction-context-participant-chevron" aria-hidden>
-                                    {expanded ? '▼' : '▶'}
-                                  </span>
-                                </button>
-                                {expanded && (
-                                  <ul
-                                    className="prediction-context-participant-picks"
-                                    id={`picks-${c.id}-${row.userId}`}
-                                  >
-                                    {row.selectedTeamIds.map((tid) => (
-                                      <li key={tid}>
-                                        {getTeamCodeOnly(teams.find((t) => t.id === tid))}
-                                      </li>
-                                    ))}
-                                  </ul>
-                                )}
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      )}
-                  </div>
-                </div>
-              )}
               {(m.scoredAt || closed) && (
                 <div style={{ marginTop: '0.75rem', padding: '0.75rem', background: '#f5f5f5', borderRadius: 8 }}>
                   {m.pointsAwarded != null && m.correctCount != null ? (
@@ -439,6 +383,87 @@ export default function PredictionContextsUserPanel({ user, teams }) {
           );
         })}
       </div>
+
+      {seasonParticipantsModalContext &&
+        createPortal(
+          (() => {
+            const mc = seasonParticipantsModalContext;
+            const mpdata = participantsByContext[mc.id];
+            const mHasDeadline = Boolean(mc.deadline && String(mc.deadline).trim());
+            const closeModal = () => setSeasonParticipantsModalContext(null);
+            return (
+              <div className="modal-overlay" onClick={closeModal}>
+                <div
+                  className="modal-content participants-modal participants-modal--season-challenge"
+                  onClick={(e) => e.stopPropagation()}
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="season-participants-modal-title"
+                >
+                  <div className="modal-header">
+                    <h3 id="season-participants-modal-title">Participants — {mc.title || 'Season challenge'}</h3>
+                    <button type="button" className="modal-close" onClick={closeModal} aria-label="Close">
+                      &times;
+                    </button>
+                  </div>
+                  <p className="muted participants-points-note" style={{ marginTop: 0 }}>
+                    {mHasDeadline
+                      ? 'Pick deadline has ended. Team codes are everyone’s saved picks.'
+                      : 'Picks are closed for this challenge. Team codes are everyone’s saved picks.'}{' '}
+                    Earned points appear after an admin scores the challenge.
+                  </p>
+                  {!mpdata ? (
+                    <p className="muted">Loading participants…</p>
+                  ) : mpdata.error ? (
+                    <p className="alert alert-error" role="alert">
+                      {mpdata.error}
+                    </p>
+                  ) : mpdata.rows.length === 0 ? (
+                    <p className="muted">No saved picks for this challenge.</p>
+                  ) : (
+                    <ul className="participants-list">
+                      <li className="participants-list-header cols-4">
+                        <span>User</span>
+                        <span>Picks (codes)</span>
+                        <span className="col-points">Points</span>
+                        <span className="col-participated-at">Participated</span>
+                      </li>
+                      {mpdata.rows.map((row, i) => {
+                        const codes = row.selectedTeamIds
+                          .map((tid) => getTeamCodeOnly(teams.find((t) => t.id === tid)))
+                          .filter(Boolean)
+                          .join(', ');
+                        const atLabel = formatParticipatedAt(row.participatedAtIso);
+                        const pts = row.pointsEarned;
+                        const ptsNum = pts != null && !Number.isNaN(Number(pts)) ? Number(pts) : null;
+                        return (
+                          <li key={row.userId || i} className="participant-item cols-4">
+                            <span className="participant-name">{row.displayName}</span>
+                            <span className="participant-prediction participant-picks-codes" title={codes || undefined}>
+                              {codes || '—'}
+                            </span>
+                            <span
+                              className={`participant-points ${ptsNum != null && ptsNum >= 0 ? 'points-positive' : ptsNum != null ? 'points-negative' : ''}`}
+                            >
+                              {ptsNum != null ? (ptsNum >= 0 ? '+' : '') + ptsNum : '—'}
+                            </span>
+                            <span
+                              className="participant-predicted-at participant-participated-at"
+                              title={row.participatedAtIso || undefined}
+                            >
+                              {atLabel}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            );
+          })(),
+          document.body
+        )}
     </section>
   );
 }

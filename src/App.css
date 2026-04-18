@@ -481,113 +481,6 @@ body {
   font-size: 1.25rem;
 }
 
-/* Season predictions: participant list after challenge closed */
-.prediction-context-participants {
-  margin-top: 0.85rem;
-  padding: 0.75rem 0.85rem;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: rgba(46, 125, 50, 0.04);
-}
-
-.prediction-context-participants-body {
-  margin-top: 0.65rem;
-}
-
-.prediction-context-participants--panel .prediction-context-participants-body {
-  margin-top: 0;
-}
-
-.prediction-context-participants--panel .prediction-context-participants-hint {
-  margin-top: 0;
-}
-
-.prediction-context-participants-hint {
-  margin: 0.35rem 0 0.5rem 0;
-  font-size: 0.82rem;
-  line-height: 1.4;
-}
-
-.prediction-context-participants-error {
-  margin: 0.35rem 0 0 0;
-  font-size: 0.88rem;
-  color: var(--error);
-}
-
-.prediction-context-participants-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  max-height: min(40vh, 16rem);
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-}
-
-.prediction-context-participant-item {
-  margin: 0;
-}
-
-.prediction-context-participant-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  width: 100%;
-  padding: 0.45rem 0.55rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--card-bg);
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
-}
-
-.prediction-context-participant-toggle:hover {
-  border-color: var(--accent);
-  background: rgba(46, 125, 50, 0.06);
-}
-
-.prediction-context-participant-toggle:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
-.prediction-context-participant-toggle.is-open {
-  border-color: var(--accent);
-}
-
-.prediction-context-participant-name {
-  font-weight: 600;
-  font-size: 0.9rem;
-}
-
-.prediction-context-participant-chevron {
-  font-size: 0.65rem;
-  opacity: 0.7;
-  flex-shrink: 0;
-}
-
-.prediction-context-participant-picks {
-  list-style: none;
-  margin: 0.4rem 0 0 0;
-  padding: 0.35rem 0.5rem 0.5rem 0.65rem;
-  border-left: 3px solid var(--accent);
-  background: rgba(255, 255, 255, 0.7);
-  border-radius: 0 0 6px 6px;
-  font-size: 0.88rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.prediction-context-participant-picks li {
-  padding: 0.15rem 0;
-}
-
 .challenge-points-embedded {
   margin-top: 1.75rem;
   padding-top: 1.25rem;
@@ -4324,6 +4217,60 @@ button.stat-card.stat-card-clickable.stat-card--win-loss:hover {
   color: var(--cricket-green);
   font-weight: 600;
   white-space: nowrap;
+}
+
+/* Season challenge participant table needs more width than default 400px .modal-content */
+.modal-content.participants-modal--season-challenge {
+  max-width: min(100%, 42rem);
+}
+
+.participants-modal--season-challenge .participants-list {
+  max-height: min(70vh, 520px);
+}
+
+.participants-modal--season-challenge .participants-list-header.cols-4,
+.participants-modal--season-challenge .participant-item.cols-4 {
+  grid-template-columns:
+    minmax(9rem, 1fr)
+    minmax(14rem, 1.85fr)
+    minmax(3.25rem, max-content)
+    minmax(12rem, auto);
+  gap: 0.6rem 0.85rem;
+  align-items: center;
+}
+
+.participants-modal--season-challenge .participants-list-header .col-participated-at {
+  text-align: right;
+  font-size: 0.8rem;
+}
+
+.participants-modal--season-challenge .participants-list-header .col-points {
+  text-align: right;
+}
+
+.participants-modal--season-challenge .participant-name {
+  overflow: visible;
+  text-overflow: unset;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.3;
+}
+
+.participant-picks-codes {
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: break-word;
+  line-height: 1.35;
+  min-width: 0;
+}
+
+.participant-participated-at {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  justify-self: end;
+  white-space: nowrap;
+  font-size: 0.85rem;
+  color: var(--text-muted);
 }
 
 .participant-points {
