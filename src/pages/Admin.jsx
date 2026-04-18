@@ -16,6 +16,7 @@ import { isPredictionEligible } from '../utils/match';
 import { getAppTodayDate } from '../utils/calendarDate';
 import { getPredictionSavedIso, formatTimeHH24 } from '../utils/predictionTime';
 import { formatInsightUserLabel } from '../utils/insightQuestions';
+import PredictionContextsAdminPanel from '../components/PredictionContextsAdminPanel';
 import * as XLSX from 'xlsx';
 
 function formatMatchTime(time) {
@@ -2194,6 +2195,10 @@ export default function Admin() {
               </div>
             </div>
           </section>
+          )}
+
+          {activeSection === 'predictionContexts' && (
+            <PredictionContextsAdminPanel teams={teams} allUsers={allUsers} setMessage={setMessage} />
           )}
 
           {activeSection === 'matches' && (

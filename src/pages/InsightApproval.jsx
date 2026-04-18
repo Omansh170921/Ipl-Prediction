@@ -344,7 +344,7 @@ export default function InsightApproval() {
         isMobileOpen={mobileMenuOpen}
         onMobileClose={() => setMobileMenuOpen(false)}
         onSectionChange={(s) => {
-          if (['dashboard', 'teams', 'rules', 'matches', 'leaderboard', 'account'].includes(s)) {
+          if (['dashboard', 'teams', 'rules', 'matches', 'qualifierPicks', 'leaderboard', 'account'].includes(s)) {
             navigate('/dashboard', { state: { section: s } });
           }
         }}

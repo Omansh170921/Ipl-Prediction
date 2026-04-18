@@ -4,13 +4,20 @@ import { useAutoDismiss } from '../hooks/useAutoDismiss';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import CricketInsights from '../components/CricketInsights';
 import InsightHistoryModalContent from '../components/InsightHistoryModalContent';
+import PredictionContextsUserPanel from '../components/PredictionContextsUserPanel';
+import MyChallengePointsPanel from '../components/MyChallengePointsPanel';
 import { useAuth } from '../context/AuthContext';
 import { collection, query, where, getDocs, getDoc, doc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import Sidebar from '../components/Sidebar';
-import { toInitCap } from '../utils/format';
+import { toInitCap, formatDdMmYyyy } from '../utils/format';
 import { getAppTodayDate } from '../utils/calendarDate';
-import { calculateLeaderboard, expectedPointsIfWinner, to2Decimals } from '../utils/points';
+import {
+  calculateLeaderboard,
+  expectedPointsIfWinner,
+  to2Decimals,
+  sumSeasonContestLeaderboardPoints,
+} from '../utils/points';
 import { isPredictionEligible, shouldShowCrowdPrediction } from '../utils/match';
 import { getPredictionSavedIso, formatTimeHH24 } from '../utils/predictionTime';
 import {
@@ -175,7 +182,13 @@ function computeRankedMainLeaderboard(
           createdAtDate &&
           createdAtDate >= matchStartDate &&
           !isUserPredictionApproved(u);
-        return isLateUser ? { ...u, points: bottomPoints, isLateUser: true } : { ...u, isLateUser: false };
+        const matchPts = isLateUser ? bottomPoints : (u.points ?? 0);
+        const seasonExtra = sumSeasonContestLeaderboardPoints(u);
+        return {
+          ...u,
+          points: to2Decimals(matchPts + seasonExtra),
+          isLateUser,
+        };
       })
       .sort((a, b) => {
         const pb = b.points ?? 0;
@@ -183,6 +196,11 @@ function computeRankedMainLeaderboard(
         if (pb !== pa) return pb - pa;
         return compareLeaderboardUsers(a, b);
       });
+  } else {
+    sortedByPoints = sortedByPoints.map((u) => ({
+      ...u,
+      points: to2Decimals((u.points ?? 0) + sumSeasonContestLeaderboardPoints(u)),
+    }));
   }
   let rank = 1;
   return sortedByPoints.map((u, i) => {
@@ -340,13 +358,65 @@ function normalizePlayers(players) {
   });
 }
 
-const DASHBOARD_SECTION_IDS = ['dashboard', 'teams', 'rules', 'matches', 'leaderboard', 'account'];
+const DASHBOARD_SECTION_IDS = ['dashboard', 'teams', 'rules', 'matches', 'qualifierPicks', 'leaderboard', 'account'];
 
 /** Tie-break for leaderboard rows: username, then email, then id. */
 function compareLeaderboardUsers(a, b) {
   const na = (a.username || a.email || a.id || '').toString();
   const nb = (b.username || b.email || b.id || '').toString();
   return na.localeCompare(nb, undefined, { sensitivity: 'base' });
+}
+
+/** Season challenge rows for leaderboard / point history modals (name + points only; no ids on UI). */
+function SeasonChallengeLeaderboardHistoryList({ entries, intro }) {
+  if (!entries?.length) return null;
+  const text =
+    intro ||
+    'Season prediction challenges: points from your correct picks when an admin scores the challenge (included in the leaderboard total).';
+  return (
+    <>
+      <p className="point-history-intro" style={{ marginTop: '1rem' }}>
+        {text}
+      </p>
+      <div
+        className="points-history-scroll point-history-scroll point-history-scroll--season-challenges"
+        role="region"
+        aria-label="Season challenge point history"
+      >
+        <ul className="point-history-cards point-history-cards--in-scroll">
+          {entries.map(([contextId, row]) => {
+            const pts = to2Decimals(Number(row?.points ?? 0));
+            const name = (row?.title || '').trim() || 'Season prediction';
+            return (
+              <li key={contextId} className="point-history-card">
+                <div className="point-history-card-head">
+                  <span className="point-history-card-badge">Season challenge</span>
+                </div>
+                <p className="point-history-card-teams" style={{ fontSize: '0.95rem' }}>
+                  {name}
+                </p>
+                <dl className="point-history-dl point-history-dl--season">
+                  <div>
+                    <dt>Points</dt>
+                    <dd className={pts >= 0 ? 'points-positive' : 'points-negative'}>
+                      {pts >= 0 ? '+' : ''}
+                      {pts}
+                    </dd>
+                  </div>
+                  {(row?.scoredAt || row?.declaredAt) && (
+                    <div>
+                      <dt>{row?.scoredAt ? 'Scored' : 'Declared'}</dt>
+                      <dd className="muted">{formatDdMmYyyy(row.scoredAt || row.declaredAt)}</dd>
+                    </div>
+                  )}
+                </dl>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </>
+  );
 }
 
 export default function Dashboard() {
@@ -400,6 +470,7 @@ export default function Dashboard() {
   const [showWinsLossesModal, setShowWinsLossesModal] = useState(false);
   const [showParticipatedModal, setShowParticipatedModal] = useState(false);
   const [showTodayMatchesModal, setShowTodayMatchesModal] = useState(false);
+  const [showChallengePointsModal, setShowChallengePointsModal] = useState(false);
   const [cricketInsightsConfig, setCricketInsightsConfig] = useState({ enabled: true, maxQuestionsPerUserPerMatch: 1, maxQuestionsPerMatch: 5 });
   const [programConfig, setProgramConfig] = useState({ matchStartDate: '', crowdPredictionVisibility: 'always' });
   const [insightQuestionCount, setInsightQuestionCount] = useState({});
@@ -1109,6 +1180,13 @@ export default function Dashboard() {
               const insightPointsTotal = to2Decimals(insightLeaderboard.find(u => u.id === user?.uid)?.insightPoints ?? 0);
               const currentUserEntry = leaderboard.find(u => u.id === user?.uid);
               const leaderboardRank = currentUserEntry?.rank ?? '—';
+              const meLbUserOverview = leaderboardRawData?.users?.find((x) => x.id === user?.uid);
+              const seasonLbMap = meLbUserOverview?.seasonContestLeaderboard;
+              const scoredChallengeCount =
+                seasonLbMap && typeof seasonLbMap === 'object'
+                  ? Object.keys(seasonLbMap).length
+                  : 0;
+              const seasonChallengePointsTotal = sumSeasonContestLeaderboardPoints(meLbUserOverview || {});
               return (
                 <div className="dashboard-stats">
                   <div className="stats-grid">
@@ -1145,10 +1223,36 @@ export default function Dashboard() {
                   type="button"
                   className="stat-card stat-card-clickable"
                   onClick={() => setShowPointsHistoryModal(true)}
-                  title="Match prediction points only (same as main leaderboard)"
+                  title="Match prediction points plus season-challenge points from scored picks (same total as main leaderboard)"
                 >
                   <span className={`stat-value ${totalPoints >= 0 ? 'points-positive' : 'points-negative'}`}>{totalPoints}</span>
                   <span className="stat-label">Total points</span>
+                </button>
+                <button
+                  type="button"
+                  className="stat-card stat-card-clickable"
+                  onClick={() => setShowChallengePointsModal(true)}
+                  title={
+                    leaderboardLoading
+                      ? 'Loading challenge summary'
+                      : `Scored challenges: ${scoredChallengeCount}, points total: ${seasonChallengePointsTotal} (included in total points above)`
+                  }
+                >
+                  <span className="stat-value stat-value--stacked">
+                    <span
+                      className={`stat-value-challenge-pts ${
+                        seasonChallengePointsTotal >= 0 ? 'points-positive' : 'points-negative'
+                      }`}
+                    >
+                      {leaderboardLoading ? '…' : seasonChallengePointsTotal}
+                    </span>
+                    {!leaderboardLoading && (
+                      <span className="stat-value-challenge-count">
+                        {scoredChallengeCount} challenge{scoredChallengeCount === 1 ? '' : 's'} with points
+                      </span>
+                    )}
+                  </span>
+                  <span className="stat-label">Challenge points</span>
                 </button>
                 {cricketInsightsConfig.enabled && (
                   <button
@@ -1175,7 +1279,7 @@ export default function Dashboard() {
                     <p className="dashboard-loading-hint muted">Loading your stats…</p>
                   )}
                   <p className="dashboard-help-hint muted">
-                    Open the sidebar to jump to <strong>Teams</strong>, <strong>Rules</strong>, <strong>Matches</strong>, or your <strong>Account</strong>.
+                    Open the sidebar to jump to <strong>Teams</strong>, <strong>Rules</strong>, <strong>Matches</strong>, <strong>Season predictions</strong>, or your <strong>Account</strong>.
                   </p>
                 </div>
               );
@@ -1249,6 +1353,10 @@ export default function Dashboard() {
           </section>
         )}
 
+        {activeSection === 'qualifierPicks' && (
+          <PredictionContextsUserPanel user={user} teams={teams} />
+        )}
+
         {activeSection === 'leaderboard' && (
           <section className="rules-section leaderboard-section" aria-labelledby="leaderboard-section-title">
             <header className="leaderboard-page-header">
@@ -1259,7 +1367,7 @@ export default function Dashboard() {
                 </h2>
                 <p className="leaderboard-page-subtitle">
                   {leaderboardTab === 'main'
-                    ? 'Standings from saved match predictions. Choose a date to see ranks up to that day, and compare with your previous rank.'
+                    ? 'Match prediction points plus season-challenge points (after an admin scores those challenges). The date filter applies to match points only; challenge points always count toward your total.'
                     : 'Standings from Cricket Insights quiz points. The same date filter applies as on Match points.'}
                 </p>
               </div>
@@ -1347,14 +1455,17 @@ export default function Dashboard() {
             {leaderboardTab === 'main' && (
               <>
                 <p className="leaderboard-points-rules muted">
-                  Scoring: no prediction −{pointRules.notParticipatedPoints ?? 7} · wrong pick −{pointRules.wrongPredictionPoints ?? 5} · correct pick shares the winners’ pool.
+                  Matches: no prediction −{pointRules.notParticipatedPoints ?? 7} · wrong pick −{pointRules.wrongPredictionPoints ?? 5} · correct pick shares the pool. Season challenges: points from your correct picks when the admin scores the challenge.
                 </p>
                 {leaderboardLoading ? (
                   <p className="leaderboard-loading-hint muted">Loading rankings…</p>
                 ) : leaderboard.length === 0 ? (
                   <div className="leaderboard-empty">
                     <p className="leaderboard-empty-title">No standings yet</p>
-                    <p className="muted">Rankings appear once there are users and at least one completed match with a result.</p>
+                    <p className="muted">
+                      Rankings use match points once there is at least one completed match with calculated points. Season-challenge
+                      points count too once an admin has scored those challenges, even if you have no match rows yet.
+                    </p>
                   </div>
                 ) : (
                   <>
@@ -1435,7 +1546,7 @@ export default function Dashboard() {
                                 type="button"
                                 className="leaderboard-username-btn"
                                 onClick={() => setUserPointHistoryModal({ user: u, mode: 'match' })}
-                                title="View match point history"
+                                title="View leaderboard history: match points (for selected date) and season challenge points"
                               >
                                 {toInitCap(u.username || u.email || 'User')}
                               </button>
@@ -2136,6 +2247,11 @@ export default function Dashboard() {
             </div>
             <div className="point-history-body">
             {(() => {
+              const meLbUser = leaderboardRawData?.users?.find((x) => x.id === user?.uid);
+              const seasonChallengeTotal = sumSeasonContestLeaderboardPoints(meLbUser || {});
+              const seasonMap = meLbUser?.seasonContestLeaderboard;
+              const seasonEntries =
+                seasonMap && typeof seasonMap === 'object' ? Object.entries(seasonMap) : [];
               const completed = sortMatchesChronological(
                 allMatches.filter(isMatchCompletedWithResult)
               );
@@ -2154,29 +2270,54 @@ export default function Dashboard() {
               }
               const displayRows = [...rowsChrono].reverse();
               const latest = displayRows[0];
-              return completed.length === 0 ? (
-                <div className="point-history-empty">
-                  <p className="point-history-empty-title">No completed matches yet</p>
-                  <p className="muted">Points will appear here after matches finish and points are calculated.</p>
-                </div>
-              ) : (
+              const matchPredTotal = latest?.runningPred ?? 0;
+              const mainLeaderboardTotal = to2Decimals(matchPredTotal + seasonChallengeTotal);
+              if (completed.length === 0 && seasonEntries.length === 0) {
+                return (
+                  <div className="point-history-empty">
+                    <p className="point-history-empty-title">No points history yet</p>
+                    <p className="muted">
+                      Match points show after games finish and an admin calculates them. Season-challenge points appear after
+                      an admin scores that challenge (from your correct picks).
+                    </p>
+                  </div>
+                );
+              }
+              return (
                 <div className="point-history-root">
-                  {latest && (
-                    <div className="point-history-summary" role="region" aria-label="Totals">
-                      <div className="point-history-summary-main">
-                        <span className="point-history-summary-label">Total prediction points</span>
-                        <span className="point-history-summary-value">{latest.runningPred}</span>
-                      </div>
-                      {cricketInsightsConfig.enabled && (
-                        <div className="point-history-summary-secondary">
-                          <span className="muted">Insight points (running)</span>
-                          <strong className={latest.runningInsight > 0 ? 'points-positive' : ''}>{latest.runningInsight}</strong>
-                        </div>
-                      )}
+                  <div className="point-history-summary" role="region" aria-label="Totals">
+                    <div className="point-history-summary-main">
+                      <span className="point-history-summary-label">Match prediction total</span>
+                      <span className="point-history-summary-value">{matchPredTotal}</span>
                     </div>
-                  )}
+                    {seasonEntries.length > 0 && (
+                      <div className="point-history-summary-secondary">
+                        <span className="muted">Season challenges (scored picks)</span>
+                        <strong className={seasonChallengeTotal >= 0 ? 'points-positive' : 'points-negative'}>
+                          {seasonChallengeTotal >= 0 ? '+' : ''}
+                          {seasonChallengeTotal}
+                        </strong>
+                      </div>
+                    )}
+                    <div className="point-history-summary-main" style={{ marginTop: '0.65rem', paddingTop: '0.65rem', borderTop: '1px solid var(--border)' }}>
+                      <span className="point-history-summary-label">Leaderboard total</span>
+                      <span className="point-history-summary-value">{mainLeaderboardTotal}</span>
+                    </div>
+                    {cricketInsightsConfig.enabled && latest && (
+                      <div className="point-history-summary-secondary">
+                        <span className="muted">Insight points (running, not in leaderboard)</span>
+                        <strong className={latest.runningInsight > 0 ? 'points-positive' : ''}>{latest.runningInsight}</strong>
+                      </div>
+                    )}
+                  </div>
+                  <SeasonChallengeLeaderboardHistoryList
+                    entries={seasonEntries}
+                    intro="Season challenges: points from correct picks when an admin scores each challenge (included in your leaderboard total above)."
+                  />
+                  {completed.length > 0 && (
+                    <>
                   <p className="point-history-intro">
-                    Newest matches first. Each row shows points for that match and your running totals after it (same basis as the main leaderboard).
+                    Newest matches first. Each row shows points for that match and your running match total after it.
                   </p>
                   <div className="points-history-scroll point-history-scroll">
                     <ul className="point-history-cards">
@@ -2229,9 +2370,36 @@ export default function Dashboard() {
                       ))}
                     </ul>
                   </div>
+                    </>
+                  )}
                 </div>
               );
             })()}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {showChallengePointsModal && user && createPortal(
+        <div className="modal-overlay" onClick={() => setShowChallengePointsModal(false)}>
+          <div className="modal-content modal-content--challenge-points" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header modal-header--points-history">
+              <div className="modal-header-points-text">
+                <h3 id="challenge-points-modal-title">Challenge points</h3>
+                <p className="modal-subtitle">{toInitCap(userProfile?.username || user?.email || 'You')}</p>
+              </div>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => setShowChallengePointsModal(false)}
+                aria-label="Close"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="challenge-points-modal-scroll">
+              <MyChallengePointsPanel user={user} teams={teams} variant="modal" />
             </div>
           </div>
         </div>,
@@ -2282,7 +2450,7 @@ export default function Dashboard() {
                 </div>
               ) : (
                 <div className="modal-header-points-text">
-                  <h3>Prediction point history</h3>
+                  <h3>Leaderboard point history</h3>
                   <p className="modal-subtitle">
                     {toInitCap(userPointHistoryModal.user?.username || userPointHistoryModal.user?.email || 'User')}
                   </p>
@@ -2305,16 +2473,29 @@ export default function Dashboard() {
 
               if (historyMode === 'match' && isLateUser) {
                 const totalPts = historyUser.points ?? 0;
+                const lateSeasonEntries = Object.entries(historyUser.seasonContestLeaderboard || {});
+                const lateSeasonTotal = sumSeasonContestLeaderboardPoints(historyUser);
+                const lateAllocMatch = to2Decimals(totalPts - lateSeasonTotal);
                 return (
                   <div className="point-history-body">
                     <div className="point-history-late-user">
                       <p className="muted">
-                        This user joined on or after match start date ({matchStartDate}). Points are allocated as the bottom ranked user total, not match-wise.
+                        This user joined on or after match start date ({matchStartDate}). Match points follow the program rule (aligned with bottom rank); season challenge points are listed separately by challenge name.
                       </p>
                       <p className="point-history-late-total">
-                        <strong>Total points: {to2Decimals(totalPts)}</strong>
+                        <strong>Leaderboard total: {to2Decimals(totalPts)}</strong>
                       </p>
+                      {lateSeasonTotal > 0 && (
+                        <p className="muted" style={{ marginTop: '0.5rem' }}>
+                          Of which season challenges: <strong className="points-positive">+{lateSeasonTotal}</strong> · Program
+                          match allocation (remainder): <strong>{lateAllocMatch}</strong>
+                        </p>
+                      )}
                     </div>
+                    <SeasonChallengeLeaderboardHistoryList
+                      entries={lateSeasonEntries}
+                      intro="Season challenges for this user (name and points)."
+                    />
                   </div>
                 );
               }
@@ -2341,6 +2522,8 @@ export default function Dashboard() {
                 );
               }
 
+              const lbSeasonEntries = Object.entries(historyUser.seasonContestLeaderboard || {});
+              const lbSeasonTotal = sumSeasonContestLeaderboardPoints(historyUser);
               const rowsChrono = [];
               let runningTotal = 0;
               for (const m of completed) {
@@ -2352,64 +2535,98 @@ export default function Dashboard() {
               }
               const displayRows = [...rowsChrono].reverse();
               const latestLb = displayRows[0];
-              return completed.length === 0 ? (
-                <div className="point-history-body">
-                  <div className="point-history-empty">
-                    <p className="point-history-empty-title">No matches in range</p>
-                    <p className="muted">No completed matches for the selected leaderboard date range.</p>
+              const matchPredThroughCutoff = latestLb ? latestLb.runningTotal : 0;
+
+              if (completed.length === 0 && lbSeasonEntries.length === 0) {
+                return (
+                  <div className="point-history-body">
+                    <div className="point-history-empty">
+                      <p className="point-history-empty-title">Nothing in this view</p>
+                      <p className="muted">
+                        No completed matches through the selected leaderboard date, and no season challenge points for this
+                        user.
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ) : (
+                );
+              }
+
+              return (
                 <div className="point-history-body">
                   <div className="point-history-root">
-                    {latestLb && (
-                      <div className="point-history-summary" role="region" aria-label="Total prediction points">
-                        <div className="point-history-summary-main">
-                          <span className="point-history-summary-label">Total prediction points</span>
-                          <span className="point-history-summary-value">{latestLb.runningTotal}</span>
-                        </div>
+                    <div className="point-history-summary" role="region" aria-label="Leaderboard totals">
+                      <div className="point-history-summary-main">
+                        <span className="point-history-summary-label">Match points (through cutoff)</span>
+                        <span className="point-history-summary-value">{matchPredThroughCutoff}</span>
                       </div>
-                    )}
-                    <p className="point-history-intro">
-                      Newest matches first. <strong>Running total</strong> is cumulative prediction points after each match (for the selected date cutoff).
-                    </p>
-                    <div className="points-history-scroll point-history-scroll">
-                      <ul className="point-history-cards">
-                        {displayRows.map(({ m, dispPts, runningTotal: rt }) => (
-                          <li key={m.id} className="point-history-card">
-                            <div className="point-history-card-head">
-                              <span className="point-history-card-badge">Match #{m.matchNumber || m.id}</span>
-                              <span className="point-history-card-date">{m.date}</span>
-                            </div>
-                            <p className="point-history-card-teams">
-                              {getTeamCode(m.team1, teams)} <span className="point-history-vs">vs</span> {getTeamCode(m.team2, teams)}
-                            </p>
-                            <dl className="point-history-dl">
-                              <div>
-                                <dt>Result</dt>
-                                <dd>{getMatchResultLabel(m, getTeamCode, teams)}</dd>
-                              </div>
-                              <div>
-                                <dt>This match</dt>
-                                <dd>
-                                  {dispPts != null ? (
-                                    <span className={dispPts >= 0 ? 'points-positive' : 'points-negative'}>
-                                      {dispPts >= 0 ? '+' : ''}{dispPts}
-                                    </span>
-                                  ) : (
-                                    <span className="muted">—</span>
-                                  )}
-                                </dd>
-                              </div>
-                              <div className="point-history-dl-cumulative">
-                                <dt>Running total · Pred</dt>
-                                <dd>{rt}</dd>
-                              </div>
-                            </dl>
-                          </li>
-                        ))}
-                      </ul>
+                      {lbSeasonEntries.length > 0 && (
+                        <div className="point-history-summary-secondary">
+                          <span className="muted">Season challenge points (from scoring)</span>
+                          <strong className={lbSeasonTotal >= 0 ? 'points-positive' : 'points-negative'}>
+                            {lbSeasonTotal >= 0 ? '+' : ''}
+                            {lbSeasonTotal}
+                          </strong>
+                        </div>
+                      )}
+                      <div
+                        className="point-history-summary-main"
+                        style={{ marginTop: '0.65rem', paddingTop: '0.65rem', borderTop: '1px solid var(--border)' }}
+                      >
+                        <span className="point-history-summary-label">Leaderboard total (ranked)</span>
+                        <span className="point-history-summary-value">{to2Decimals(historyUser.points ?? 0)}</span>
+                      </div>
                     </div>
+                    <SeasonChallengeLeaderboardHistoryList
+                      entries={lbSeasonEntries}
+                      intro="Season challenges: challenge name and points from correct picks when the admin scored each one."
+                    />
+                    {completed.length > 0 ? (
+                      <>
+                        <p className="point-history-intro">
+                          Newest matches first. Running total is cumulative match prediction points after each completed match
+                          (for the selected leaderboard date only).
+                        </p>
+                        <div className="points-history-scroll point-history-scroll">
+                          <ul className="point-history-cards">
+                            {displayRows.map(({ m, dispPts, runningTotal: rt }) => (
+                              <li key={m.id} className="point-history-card">
+                                <div className="point-history-card-head">
+                                  <span className="point-history-card-badge">Match #{m.matchNumber || m.id}</span>
+                                  <span className="point-history-card-date">{m.date}</span>
+                                </div>
+                                <p className="point-history-card-teams">
+                                  {getTeamCode(m.team1, teams)} <span className="point-history-vs">vs</span>{' '}
+                                  {getTeamCode(m.team2, teams)}
+                                </p>
+                                <dl className="point-history-dl">
+                                  <div>
+                                    <dt>Result</dt>
+                                    <dd>{getMatchResultLabel(m, getTeamCode, teams)}</dd>
+                                  </div>
+                                  <div>
+                                    <dt>This match</dt>
+                                    <dd>
+                                      {dispPts != null ? (
+                                        <span className={dispPts >= 0 ? 'points-positive' : 'points-negative'}>
+                                          {dispPts >= 0 ? '+' : ''}
+                                          {dispPts}
+                                        </span>
+                                      ) : (
+                                        <span className="muted">—</span>
+                                      )}
+                                    </dd>
+                                  </div>
+                                  <div className="point-history-dl-cumulative">
+                                    <dt>Running total · Pred</dt>
+                                    <dd>{rt}</dd>
+                                  </div>
+                                </dl>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      </>
+                    ) : null}
                   </div>
                 </div>
               );

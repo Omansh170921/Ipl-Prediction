@@ -109,3 +109,14 @@ export function calculateLeaderboard(completedMatches, allUsers, allPredictionsB
 
   return totals;
 }
+
+/**
+ * Sum leaderboard bonus points from season prediction contests (declared winners).
+ * Stored on user as seasonContestLeaderboard: { [contextDocId]: { points, title, contextCode, scoredAt, declaredAt? } }.
+ * Points are written when an admin scores the challenge (from correct picks); optional declaredAt for legacy rows.
+ */
+export function sumSeasonContestLeaderboardPoints(user) {
+  const m = user?.seasonContestLeaderboard;
+  if (!m || typeof m !== 'object') return 0;
+  return Object.values(m).reduce((acc, v) => acc + to2Decimals(Number(v?.points ?? 0)), 0);
+}

@@ -1,12 +1,19 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Helper: user is admin if their users/{uid} doc has isAdmin == true
+    // Admin: Firestore users/{uid}.isAdmin and/or Auth custom claim admin (optional).
     function isAdmin() {
-      return request.auth != null &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true ||
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == 'true');
+      return request.auth != null && (
+        request.auth.token.admin == true ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          (
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true ||
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == 'true' ||
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == 1
+          )
+        )
+      );
     }
 
     // Cricket insight answers: only while match is not completed (match doc status != 'completed')
@@ -17,6 +24,22 @@ service cloud.firestore {
           !exists(/databases/$(database)/documents/matches/$(get(/databases/$(database)/documents/cricket_questions/$(questionId)).data.matchId)) ||
           get(/databases/$(database)/documents/matches/$(get(/databases/$(database)/documents/cricket_questions/$(questionId)).data.matchId)).data.status != 'completed'
         );
+    }
+
+    // True when this context exists and is still accepting predictions (only own response readable by non-admins).
+    function predictionContextPicksAreOpen(contextId) {
+      return exists(/databases/$(database)/documents/prediction_contexts/$(contextId)) &&
+        (
+          get(/databases/$(database)/documents/prediction_contexts/$(contextId)).data.acceptingPredictions == true ||
+          get(/databases/$(database)/documents/prediction_contexts/$(contextId)).data.acceptingPredictions == 'true' ||
+          get(/databases/$(database)/documents/prediction_contexts/$(contextId)).data.acceptingPredictions == 1
+        );
+    }
+
+    // Set by admin when saving deadline (Timestamp). Legacy docs without deadlineAt rely on client-only checks.
+    function predictionContextDeadlineHasPassed(contextId) {
+      let ctx = get(/databases/$(database)/documents/prediction_contexts/$(contextId)).data;
+      return ctx.deadlineAt != null && request.time > ctx.deadlineAt;
     }
 
     // OTP verification during registration
@@ -36,8 +59,13 @@ service cloud.firestore {
     // Users can WRITE and DELETE their own document (for account surrender); admin can DELETE any user
     match /users/{userId} {
       allow read: if true;
-      allow create: if request.auth != null && request.auth.uid == userId;
-      allow update: if request.auth != null && (request.auth.uid == userId || isAdmin());
+      // seasonContestLeaderboard is written only by admins (contest winner bonuses for main leaderboard)
+      allow create: if request.auth != null && request.auth.uid == userId &&
+        !request.resource.data.keys().hasAny(['seasonContestLeaderboard']);
+      allow update: if isAdmin() || (
+        request.auth != null && request.auth.uid == userId &&
+        !request.resource.data.diff(resource.data).changedKeys().hasAny(['seasonContestLeaderboard'])
+      );
       allow delete: if isAdmin() || (request.auth != null && request.auth.uid == userId);
     }
 
@@ -96,6 +124,36 @@ service cloud.firestore {
         insightMatchNotCompleted(request.resource.data.questionId);
       allow update, delete: if request.auth != null && resource.data.userId == request.auth.uid &&
         insightMatchNotCompleted(resource.data.questionId);
+    }
+
+    // Prediction contexts (e.g. quarter-final qualifiers): admin defines tiers; users submit team picks under open context
+    // Deploy: firebase deploy --only firestore:rules (local file is ignored until deployed)
+    match /prediction_contexts/{contextId} {
+      allow read: if request.auth != null;
+      allow create, update, delete: if isAdmin();
+
+      // Own response always readable. Others' responses when picks are closed, or pick deadline has passed
+      // (deadlineAt), so the participant list can load even if admin has not toggled acceptingPredictions yet.
+      match /responses/{userId} {
+        allow read: if request.auth != null && (
+          isAdmin() ||
+          request.auth.uid == userId ||
+          !predictionContextPicksAreOpen(contextId) ||
+          predictionContextDeadlineHasPassed(contextId)
+        );
+        allow create: if request.auth != null && request.auth.uid == userId &&
+          get(/databases/$(database)/documents/prediction_contexts/$(contextId)).data.active == true &&
+          get(/databases/$(database)/documents/prediction_contexts/$(contextId)).data.acceptingPredictions == true &&
+          !predictionContextDeadlineHasPassed(contextId);
+        allow update: if isAdmin() ||
+          (request.auth != null && request.auth.uid == userId &&
+            get(/databases/$(database)/documents/prediction_contexts/$(contextId)).data.active == true &&
+            get(/databases/$(database)/documents/prediction_contexts/$(contextId)).data.acceptingPredictions == true &&
+            !predictionContextDeadlineHasPassed(contextId));
+        allow delete: if isAdmin() || (request.auth != null && request.auth.uid == userId &&
+          get(/databases/$(database)/documents/prediction_contexts/$(contextId)).data.acceptingPredictions == true &&
+          !predictionContextDeadlineHasPassed(contextId));
+      }
     }
   }
 }

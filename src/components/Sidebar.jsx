@@ -73,6 +73,10 @@ export default function Sidebar({ admin = false, userProfile, user, onLogout, ac
               <span className="sidebar-icon">📥</span>
               Export points
             </button>
+            <button type="button" className={`sidebar-link ${activeSection === 'predictionContexts' ? 'active' : ''}`} onClick={() => { onSectionChange?.('predictionContexts'); onMobileClose?.(); }}>
+              <span className="sidebar-icon">🎯</span>
+              Season challenges
+            </button>
           </>
         ) : (
           <>
@@ -91,6 +95,10 @@ export default function Sidebar({ admin = false, userProfile, user, onLogout, ac
             <button type="button" className={`sidebar-link ${activeSection === 'matches' ? 'active' : ''}`} onClick={() => { onSectionChange?.('matches'); onMobileClose?.(); }}>
               <span className="sidebar-icon">🏟️</span>
               Matches
+            </button>
+            <button type="button" className={`sidebar-link ${activeSection === 'qualifierPicks' ? 'active' : ''}`} onClick={() => { onSectionChange?.('qualifierPicks'); onMobileClose?.(); }}>
+              <span className="sidebar-icon">🎯</span>
+              Season predictions
             </button>
             <button type="button" className={`sidebar-link ${activeSection === 'leaderboard' ? 'active' : ''}`} onClick={() => { onSectionChange?.('leaderboard'); onMobileClose?.(); }}>
               <span className="sidebar-icon">🏆</span>

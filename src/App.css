@@ -263,6 +263,12 @@ body {
   background: rgba(102, 187, 106, 0.12);
 }
 
+.match-card-icons .btn-outline.active {
+  background: rgba(102, 187, 106, 0.22);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(46, 125, 50, 0.18);
+}
+
 .btn-icon-only {
   display: inline-flex;
   align-items: center;
@@ -475,6 +481,321 @@ body {
   font-size: 1.25rem;
 }
 
+/* Season predictions: participant list after challenge closed */
+.prediction-context-participants {
+  margin-top: 0.85rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(46, 125, 50, 0.04);
+}
+
+.prediction-context-participants-body {
+  margin-top: 0.65rem;
+}
+
+.prediction-context-participants--panel .prediction-context-participants-body {
+  margin-top: 0;
+}
+
+.prediction-context-participants--panel .prediction-context-participants-hint {
+  margin-top: 0;
+}
+
+.prediction-context-participants-hint {
+  margin: 0.35rem 0 0.5rem 0;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.prediction-context-participants-error {
+  margin: 0.35rem 0 0 0;
+  font-size: 0.88rem;
+  color: var(--error);
+}
+
+.prediction-context-participants-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: min(40vh, 16rem);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.prediction-context-participant-item {
+  margin: 0;
+}
+
+.prediction-context-participant-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card-bg);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.prediction-context-participant-toggle:hover {
+  border-color: var(--accent);
+  background: rgba(46, 125, 50, 0.06);
+}
+
+.prediction-context-participant-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.prediction-context-participant-toggle.is-open {
+  border-color: var(--accent);
+}
+
+.prediction-context-participant-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.prediction-context-participant-chevron {
+  font-size: 0.65rem;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.prediction-context-participant-picks {
+  list-style: none;
+  margin: 0.4rem 0 0 0;
+  padding: 0.35rem 0.5rem 0.5rem 0.65rem;
+  border-left: 3px solid var(--accent);
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 0 0 6px 6px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.prediction-context-participant-picks li {
+  padding: 0.15rem 0;
+}
+
+.challenge-points-embedded {
+  margin-top: 1.75rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.challenge-points-embedded .challenge-points-heading {
+  color: var(--cricket-green);
+  font-size: 1.15rem;
+  margin-bottom: 0.35rem;
+}
+
+.challenge-points-panel-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.challenge-points-panel-header .section-heading,
+.challenge-points-panel-header .challenge-points-heading {
+  margin-bottom: 0;
+}
+
+.challenge-points-panel-header--refresh-only {
+  justify-content: flex-end;
+  margin-bottom: 0.35rem;
+}
+
+.challenge-points-in-modal .challenge-points-list {
+  margin-top: 0.65rem;
+}
+
+.modal-content.modal-content--challenge-points {
+  max-width: min(100%, 28rem);
+  padding: 0;
+  overflow: hidden;
+}
+
+.challenge-points-modal-scroll {
+  padding: 0 1.25rem 1.35rem;
+  max-height: min(65vh, 28rem);
+  overflow-y: auto;
+}
+
+.challenge-points-list {
+  list-style: none;
+  margin: 1rem 0 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.challenge-points-row {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.6);
+  overflow: hidden;
+}
+
+.challenge-points-row-summary {
+  display: flex;
+  gap: 0.45rem;
+  align-items: flex-start;
+  width: 100%;
+  padding: 0.85rem 1rem;
+  margin: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 0;
+}
+
+.challenge-points-row-summary:hover {
+  background: rgba(46, 125, 50, 0.06);
+}
+
+.challenge-points-row-summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.challenge-points-row-chevron {
+  flex-shrink: 0;
+  font-size: 0.65rem;
+  opacity: 0.65;
+  margin-top: 0.4rem;
+  width: 1rem;
+  text-align: center;
+}
+
+.challenge-points-row-summary-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.challenge-points-picks-detail {
+  padding: 0.65rem 1rem 0.9rem 2.35rem;
+  border-top: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.025);
+}
+
+.challenge-points-picks-heading {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--cricket-green);
+  margin: 0 0 0.4rem 0;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.challenge-points-picks-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.challenge-points-pick-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid var(--border);
+}
+
+.challenge-points-pick-row--correct {
+  border-color: rgba(46, 125, 50, 0.45);
+  background: rgba(46, 125, 50, 0.08);
+}
+
+.challenge-points-pick-row--wrong {
+  border-color: rgba(198, 40, 40, 0.35);
+  background: rgba(198, 40, 40, 0.06);
+}
+
+.challenge-points-pick-mark {
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.challenge-points-pick-row--correct .challenge-points-pick-mark {
+  color: var(--success);
+}
+
+.challenge-points-pick-row--wrong .challenge-points-pick-mark {
+  color: var(--error);
+}
+
+.challenge-points-row-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.challenge-points-title {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.challenge-points-status {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.challenge-points-status--open {
+  color: var(--success);
+}
+
+.challenge-points-status--closed {
+  color: #b8860b;
+}
+
+.challenge-points-status--scored {
+  color: var(--accent);
+}
+
+.challenge-points-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.challenge-points-date {
+  font-size: 0.85rem;
+}
+
 .dashboard-stats {
   margin-bottom: 1.5rem;
 }
@@ -511,6 +832,35 @@ body {
 
 .stat-card .stat-value.points-negative {
   color: var(--error);
+}
+
+.stat-card .stat-value.stat-value--stacked {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.stat-card .stat-value.stat-value--stacked .stat-value-challenge-pts {
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.stat-card .stat-value-challenge-pts.points-positive {
+  color: var(--success);
+}
+
+.stat-card .stat-value-challenge-pts.points-negative {
+  color: var(--error);
+}
+
+.stat-card .stat-value.stat-value--stacked .stat-value-challenge-count {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  line-height: 1.25;
+  max-width: 11rem;
 }
 
 .stat-card .stat-label {
@@ -1902,6 +2252,27 @@ button.stat-card.stat-card-clickable.stat-card--win-loss:hover {
   font-size: 1.2rem;
 }
 
+/* Secondary buttons default to white text (dark chrome); admin cards are light — use dark outline */
+.admin-section .btn-secondary {
+  color: var(--btn-outline);
+  border-color: var(--btn-outline);
+  background: transparent;
+}
+
+.admin-section .btn-secondary:hover:not(:disabled) {
+  background: rgba(102, 187, 106, 0.15);
+}
+
+.admin-section .btn-outline {
+  color: var(--btn-outline);
+  border-color: var(--btn-outline);
+  background: transparent;
+}
+
+.admin-section .btn-outline:hover:not(:disabled) {
+  background: rgba(102, 187, 106, 0.12);
+}
+
 .inline-form,
 .team-form,
 .rule-form {
@@ -2561,6 +2932,275 @@ button.stat-card.stat-card-clickable.stat-card--win-loss:hover {
   flex-shrink: 0;
 }
 
+/* Admin – prediction contexts */
+.prediction-context-intro {
+  margin-bottom: 1.25rem;
+  padding: 1rem 1.1rem;
+  background: rgba(102, 187, 106, 0.08);
+  border: 1px solid rgba(102, 187, 106, 0.25);
+  border-radius: 10px;
+}
+
+.prediction-context-intro > p {
+  margin: 0 0 0.65rem 0;
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.prediction-context-steps-intro {
+  margin: 0;
+  padding-left: 1.2rem;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: var(--text-muted, #5c6c5c);
+}
+
+.prediction-context-steps-intro li {
+  margin-bottom: 0.35rem;
+}
+
+.prediction-context-steps-intro li:last-child {
+  margin-bottom: 0;
+}
+
+.prediction-context-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.prediction-context-toolbar .btn-primary {
+  min-height: 2.5rem;
+  padding-left: 1.1rem;
+  padding-right: 1.1rem;
+}
+
+.prediction-contexts-admin-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.prediction-context-admin-row {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.prediction-context-admin-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.1rem 1.2rem;
+  background: var(--card-bg);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.prediction-context-card-title {
+  margin: 0 0 0.35rem 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.35;
+}
+
+.prediction-context-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.5rem 0 0.35rem 0;
+}
+
+.prediction-context-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  line-height: 1.2;
+}
+
+.prediction-context-badge-picks-open {
+  background: rgba(46, 125, 50, 0.12);
+  color: #2e7d32;
+}
+
+.prediction-context-badge-picks-closed {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--text-muted, #666);
+}
+
+.prediction-context-badge-live {
+  background: rgba(25, 118, 210, 0.12);
+  color: #1565c0;
+}
+
+.prediction-context-badge-hidden {
+  background: rgba(183, 28, 28, 0.1);
+  color: #c62828;
+}
+
+.prediction-context-badge-done {
+  background: rgba(0, 131, 143, 0.12);
+  color: #006978;
+}
+
+.prediction-context-card-meta {
+  margin: 0.25rem 0 0 0;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: var(--text-muted, #666);
+}
+
+.prediction-context-admin-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.prediction-context-admin-header .insight-pending-content {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.prediction-context-admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.prediction-context-admin-actions .prediction-context-actions-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.prediction-context-admin-actions .prediction-context-actions-danger {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding-left: 0.45rem;
+  margin-left: 0.25rem;
+  border-left: 1px solid var(--border);
+}
+
+.prediction-context-manage-panel {
+  margin-top: 1rem;
+  padding: 1rem 1.1rem;
+  background: rgba(0, 0, 0, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.prediction-context-manage-step {
+  margin-bottom: 1.35rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px dashed var(--border);
+}
+
+.prediction-context-manage-step:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.prediction-context-manage-step h4 {
+  margin: 0 0 0.35rem 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--cricket-green, #2e7d32);
+}
+
+.prediction-context-manage-step .step-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted, #666);
+  margin-bottom: 0.5rem;
+}
+
+.prediction-context-form-block {
+  margin-bottom: 1.35rem;
+  padding-bottom: 1.15rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.prediction-context-form-block:last-of-type {
+  border-bottom: none;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0;
+}
+
+.prediction-context-form-block h4 {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--cricket-green, #2e7d32);
+}
+
+.prediction-context-empty {
+  text-align: center;
+  padding: 2rem 1rem;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.prediction-context-empty p {
+  margin: 0 0 1rem 0;
+  color: var(--text-muted, #666);
+  font-size: 0.95rem;
+}
+
+.prediction-context-admin-header .prediction-context-admin-actions {
+  flex: 0 0 auto;
+  min-width: min-content;
+  max-width: 100%;
+}
+
+@media (max-width: 640px) {
+  .prediction-context-admin-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .prediction-context-admin-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .prediction-context-admin-actions .prediction-context-actions-main,
+  .prediction-context-admin-actions .prediction-context-actions-danger {
+    width: 100%;
+    justify-content: flex-start;
+    border-left: none;
+    padding-left: 0;
+    margin-left: 0;
+    border-top: 1px solid var(--border);
+    padding-top: 0.65rem;
+    margin-top: 0.35rem;
+  }
+
+  .prediction-context-admin-actions .btn-sm {
+    flex: 1 1 auto;
+    justify-content: center;
+    min-width: 0;
+  }
+}
+
 /* Cricket Insights – User view */
 .insights-questions-list {
   display: flex;
@@ -2946,12 +3586,19 @@ button.stat-card.stat-card-clickable.stat-card--win-loss:hover {
 
 .modal-content.modal-content--points-history {
   max-width: min(100%, 28rem);
+  max-height: min(92vh, 40rem);
   padding: 0;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
 }
 
 .point-history-body {
   padding: 1.15rem 1.25rem 1.35rem;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .point-history-root {
@@ -3011,6 +3658,16 @@ button.stat-card.stat-card-clickable.stat-card--win-loss:hover {
   max-height: min(60vh, 26rem);
 }
 
+/* Season challenges block in prediction point history modal (override match scroll height) */
+.points-history-scroll.point-history-scroll--season-challenges {
+  margin-top: 0.35rem;
+  max-height: min(45vh, 20rem);
+}
+
+.point-history-cards--in-scroll {
+  margin-bottom: 0;
+}
+
 .point-history-cards {
   list-style: none;
   margin: 0;
@@ -3059,6 +3716,19 @@ button.stat-card.stat-card-clickable.stat-card--win-loss:hover {
   font-weight: 600;
   color: var(--text);
   line-height: 1.35;
+}
+
+.point-history-dl.point-history-dl--season {
+  grid-template-columns: 1fr;
+}
+
+.point-history-context-id {
+  display: inline-block;
+  max-width: 100%;
+  word-break: break-all;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  margin-top: 0.15rem;
 }
 
 .point-history-vs {
