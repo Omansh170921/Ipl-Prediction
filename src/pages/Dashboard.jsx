@@ -4,6 +4,7 @@ import { useAutoDismiss } from '../hooks/useAutoDismiss';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import CricketInsights from '../components/CricketInsights';
 import InsightHistoryModalContent from '../components/InsightHistoryModalContent';
+import PointsHistoryChart from '../components/PointsHistoryChart';
 import PredictionContextsUserPanel from '../components/PredictionContextsUserPanel';
 import MyChallengePointsPanel from '../components/MyChallengePointsPanel';
 import { useAuth } from '../context/AuthContext';
@@ -14,6 +15,7 @@ import { toInitCap, formatDdMmYyyy } from '../utils/format';
 import { getAppTodayDate } from '../utils/calendarDate';
 import {
   calculateLeaderboard,
+  countPredictionPickStatsPerUser,
   expectedPointsIfWinner,
   to2Decimals,
   sumSeasonContestLeaderboardPoints,
@@ -212,6 +214,46 @@ function computeRankedMainLeaderboard(
     if (i > 0 && (sortedByPoints[i - 1].points ?? 0) > (u.points ?? 0)) rank += 1;
     return { ...u, rank };
   });
+}
+
+/** Rank by count of correct match-winner predictions (not pool points). */
+function computeRankedPredictionWinsLeaderboard(
+  allMatches,
+  users,
+  predsByMatch,
+  dateCutoff,
+  completedMatchesOverride
+) {
+  let completedMatches;
+  if (Array.isArray(completedMatchesOverride)) {
+    completedMatches = sortMatchesChronological(completedMatchesOverride.slice());
+  } else {
+    completedMatches = allMatches.filter(isMatchCompletedWithResult);
+    if (dateCutoff) {
+      completedMatches = completedMatches.filter((m) => (m.date || '') <= dateCutoff);
+    }
+    completedMatches = sortMatchesChronological(completedMatches);
+  }
+  const { correct, wrong, notPredicted, drawResultCount } = countPredictionPickStatsPerUser(
+    completedMatches,
+    users,
+    predsByMatch
+  );
+  const sorted = users
+    .map((u) => ({
+      ...u,
+      predictionWins: correct[u.id] ?? 0,
+      predictionWrongs: wrong[u.id] ?? 0,
+      predictionNotPredicted: notPredicted[u.id] ?? 0,
+      drawResultCount,
+    }))
+    .sort((a, b) => {
+      const wb = b.predictionWins ?? 0;
+      const wa = a.predictionWins ?? 0;
+      if (wb !== wa) return wb - wa;
+      return compareLeaderboardUsers(a, b);
+    });
+  return sorted;
 }
 
 function computeInsightRanked(users, allMatches, dateCutoff) {
@@ -463,6 +505,7 @@ export default function Dashboard() {
   const [teams, setTeams] = useState([]);
   const [leaderboard, setLeaderboard] = useState([]);
   const [insightLeaderboard, setInsightLeaderboard] = useState([]);
+  const [predictionWinsLeaderboard, setPredictionWinsLeaderboard] = useState([]);
   const [leaderboardTab, setLeaderboardTab] = useState('main');
   const [leaderboardDate, setLeaderboardDate] = useState(() => getAppTodayDate());
   const [leaderboardRawData, setLeaderboardRawData] = useState(null);
@@ -470,6 +513,10 @@ export default function Dashboard() {
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
   const [leaderboardRefresh, setLeaderboardRefresh] = useState(0);
   const [userPointHistoryModal, setUserPointHistoryModal] = useState(null);
+  /** 'list' | 'chart' — leaderboard user point history modal */
+  const [userPointHistoryView, setUserPointHistoryView] = useState('list');
+  /** 'list' | 'chart' — your prediction point history modal */
+  const [ownPointHistoryView, setOwnPointHistoryView] = useState('list');
   const [showWinnerLoser, setShowWinnerLoser] = useState(true);
   const [matchesRefresh, setMatchesRefresh] = useState(0);
   const [surrenderDeadline, setSurrenderDeadline] = useState(null);
@@ -528,6 +575,14 @@ export default function Dashboard() {
     const id = setInterval(() => bumpCrowdRevealTick(), 30000);
     return () => clearInterval(id);
   }, [activeSection]);
+
+  useEffect(() => {
+    if (!userPointHistoryModal) setUserPointHistoryView('list');
+  }, [userPointHistoryModal]);
+
+  useEffect(() => {
+    if (!showPointsHistoryModal) setOwnPointHistoryView('list');
+  }, [showPointsHistoryModal]);
 
   useEffect(() => {
     const section = location.state?.section;
@@ -974,6 +1029,14 @@ export default function Dashboard() {
         rankAtPrevious: hasPreviousRank ? insightRankAtPreviousById.get(u.id) ?? null : null,
       }))
     );
+
+    const rankedPw = computeRankedPredictionWinsLeaderboard(
+      allMatches,
+      users,
+      predsByMatch,
+      leaderboardDate || ''
+    );
+    setPredictionWinsLeaderboard(rankedPw);
   }, [leaderboardRawData, leaderboardDate]);
 
   const previousRankContext = leaderboardRawData
@@ -1477,12 +1540,19 @@ export default function Dashboard() {
                 <p className="leaderboard-page-subtitle">
                   {leaderboardTab === 'main'
                     ? 'Match prediction points plus season-challenge points (after an admin scores those challenges). The date filter applies to match points only; challenge points always count toward your total.'
-                    : 'Standings from Cricket Insights quiz points. The same date filter applies as on Match points.'}
+                    : leaderboardTab === 'predictionWins'
+                      ? 'Name with correct and wrong winner predictions (counts only; not pool points).'
+                      : 'Standings from Cricket Insights quiz points. The same date filter applies as on Match points.'}
                 </p>
               </div>
               {!leaderboardLoading && (
                 <span className="leaderboard-player-count" aria-live="polite">
-                  {leaderboardTab === 'main' ? leaderboard.length : insightLeaderboard.length} players
+                  {leaderboardTab === 'main'
+                    ? leaderboard.length
+                    : leaderboardTab === 'predictionWins'
+                      ? predictionWinsLeaderboard.length
+                      : insightLeaderboard.length}{' '}
+                  players
                 </span>
               )}
             </header>
@@ -1497,19 +1567,28 @@ export default function Dashboard() {
                 </button>
                 <button
                   type="button"
+                  className={`filter-tag ${leaderboardTab === 'predictionWins' ? 'active' : ''}`}
+                  onClick={() => setLeaderboardTab('predictionWins')}
+                >
+                  Correct picks
+                </button>
+                <button
+                  type="button"
                   className={`filter-tag ${leaderboardTab === 'insights' ? 'active' : ''}`}
                   onClick={() => setLeaderboardTab('insights')}
                 >
                   Insight points
                 </button>
-                <button
-                  type="button"
-                  className={`filter-tag ${showWinnerLoser ? 'active' : ''}`}
-                  onClick={() => setShowWinnerLoser(v => !v)}
-                  title={`Highlights top ${100 - (leaderboardRawData?.programConfig?.loserPercent ?? 25)}% (🏆) and bottom ${leaderboardRawData?.programConfig?.loserPercent ?? 25}% (📉) of the list`}
-                >
-                  {showWinnerLoser ? 'Top / bottom: on' : 'Show top & bottom'}
-                </button>
+                {leaderboardTab !== 'predictionWins' && (
+                  <button
+                    type="button"
+                    className={`filter-tag ${showWinnerLoser ? 'active' : ''}`}
+                    onClick={() => setShowWinnerLoser((v) => !v)}
+                    title={`Highlights top ${100 - (leaderboardRawData?.programConfig?.loserPercent ?? 25)}% (🏆) and bottom ${leaderboardRawData?.programConfig?.loserPercent ?? 25}% (📉) of the list`}
+                  >
+                    {showWinnerLoser ? 'Top / bottom: on' : 'Show top & bottom'}
+                  </button>
+                )}
               </div>
               <div className="leaderboard-date-group">
                 <label htmlFor="leaderboard-date">Rank using matches on or before</label>
@@ -1533,28 +1612,39 @@ export default function Dashboard() {
                 </div>
                 <div className="leaderboard-help-box">
                   <p className="leaderboard-help-box-text">
-                    <strong>Current rank</strong> uses points from completed matches on or before{' '}
-                    {leaderboardDate ? <strong>{leaderboardDate}</strong> : <strong>the full schedule</strong>}.
-                    {previousMatchCutoffDate ? (
+                    {leaderboardTab === 'predictionWins' ? (
                       <>
-                        {' '}
-                        <strong>Previous rank</strong> is based on matches on or before{' '}
-                        <strong>{previousMatchCutoffDate}</strong>
-                        {previousRankContext?.excludeLastCompletedMatch ? (
-                          <> (the latest finished match is ignored when today’s match is not done yet).</>
-                        ) : (
-                          <> — the last completed match before your selected window.</>
-                        )}
-                      </>
-                    ) : previousRankContext?.excludeLastCompletedMatch ? (
-                      <>
-                        {' '}
-                        <strong>Previous rank</strong> is not shown yet — we need at least two finished matches to compare.
+                        Sorted by <strong>correct</strong> (highest first). Scope: completed matches on or before{' '}
+                        {leaderboardDate ? <strong>{leaderboardDate}</strong> : <strong>the full schedule</strong>}.{' '}
+                        <strong>Not pred.</strong> = team-winner games with no saved pick. <strong>Draw</strong> = finished
+                        games that were draw or cancelled (same league total for everyone).
                       </>
                     ) : (
                       <>
-                        {' '}
-                        <strong>Previous rank</strong> is not available for this date (no earlier completed match to compare).
+                        <strong>Current rank</strong> uses points from completed matches on or before{' '}
+                        {leaderboardDate ? <strong>{leaderboardDate}</strong> : <strong>the full schedule</strong>}.
+                        {previousMatchCutoffDate ? (
+                          <>
+                            {' '}
+                            <strong>Previous rank</strong> is based on matches on or before{' '}
+                            <strong>{previousMatchCutoffDate}</strong>
+                            {previousRankContext?.excludeLastCompletedMatch ? (
+                              <> (the latest finished match is ignored when today’s match is not done yet).</>
+                            ) : (
+                              <> — the last completed match before your selected window.</>
+                            )}
+                          </>
+                        ) : previousRankContext?.excludeLastCompletedMatch ? (
+                          <>
+                            {' '}
+                            <strong>Previous rank</strong> is not shown yet — we need at least two finished matches to compare.
+                          </>
+                        ) : (
+                          <>
+                            {' '}
+                            <strong>Previous rank</strong> is not available for this date (no earlier completed match to compare).
+                          </>
+                        )}
                       </>
                     )}
                   </p>
@@ -1655,7 +1745,7 @@ export default function Dashboard() {
                                 type="button"
                                 className="leaderboard-username-btn"
                                 onClick={() => setUserPointHistoryModal({ user: u, mode: 'match' })}
-                                title="View leaderboard history: match points (for selected date) and season challenge points"
+                                title="View leaderboard point history (list or chart) for the selected date"
                               >
                                 {toInitCap(u.username || u.email || 'User')}
                               </button>
@@ -1669,6 +1759,96 @@ export default function Dashboard() {
                           );
                         });
                       })()}
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+            {leaderboardTab === 'predictionWins' && (
+              <>
+                <p className="leaderboard-points-rules muted">
+                  Correct / wrong / not pred. apply only to matches with a team winner. Draw column counts draw or cancelled
+                  finishes in the date range (league-wide).
+                </p>
+                {leaderboardLoading ? (
+                  <p className="leaderboard-loading-hint muted">Loading rankings…</p>
+                ) : predictionWinsLeaderboard.length === 0 ? (
+                  <div className="leaderboard-empty">
+                    <p className="leaderboard-empty-title">No standings yet</p>
+                    <p className="muted">Need at least one participating user. After matches finish with a team winner, counts appear.</p>
+                  </div>
+                ) : (
+                  <>
+                    {user && (() => {
+                      const myEntry = predictionWinsLeaderboard.find((x) => x.id === user.uid);
+                      const myWins = myEntry?.predictionWins ?? 0;
+                      const myWrongs = myEntry?.predictionWrongs ?? 0;
+                      const mySkip = myEntry?.predictionNotPredicted ?? 0;
+                      const drawN = myEntry?.drawResultCount ?? 0;
+                      return (
+                        <div className="leaderboard-toolbar">
+                          <p className="leaderboard-summary">
+                            <span className="leaderboard-summary-item">
+                              Correct: <strong className="points-positive">{myWins}</strong>
+                            </span>
+                            <span className="leaderboard-summary-item">
+                              Wrong: <strong className="points-negative">{myWrongs}</strong>
+                            </span>
+                            <span className="leaderboard-summary-item">
+                              Not pred.: <strong>{mySkip}</strong>
+                            </span>
+                            <span className="leaderboard-summary-item">
+                              Draw games: <strong>{drawN}</strong>
+                            </span>
+                          </p>
+                          <button
+                            type="button"
+                            className="btn btn-sm leaderboard-refresh-btn"
+                            onClick={() => setLeaderboardRefresh((r) => r + 1)}
+                            title="Reload rankings from the server"
+                          >
+                            Refresh
+                          </button>
+                        </div>
+                      );
+                    })()}
+                    {!user && (
+                      <div className="leaderboard-toolbar leaderboard-toolbar--solo">
+                        <button
+                          type="button"
+                          className="btn btn-sm leaderboard-refresh-btn"
+                          onClick={() => setLeaderboardRefresh((r) => r + 1)}
+                          title="Reload rankings from the server"
+                        >
+                          Refresh
+                        </button>
+                      </div>
+                    )}
+                    <div className="leaderboard-table leaderboard-table--pick-counts">
+                      <div className="leaderboard-header">
+                        <span>Name</span>
+                        <span className="leaderboard-pick-col" title="Team won; your pick matched">
+                          Correct
+                        </span>
+                        <span className="leaderboard-pick-col" title="Team won; you picked the other team">
+                          Wrong
+                        </span>
+                        <span className="leaderboard-pick-col" title="Team won; you had no saved prediction">
+                          Not pred.
+                        </span>
+                        <span className="leaderboard-pick-col" title="Draw or cancelled results in this period (same for all)">
+                          Draw
+                        </span>
+                      </div>
+                      {predictionWinsLeaderboard.map((u) => (
+                        <div key={u.id} className={`leaderboard-row ${u.id === user?.uid ? 'current-user' : ''}`}>
+                          <span className="leaderboard-pick-name">{toInitCap(u.username || u.email || 'User')}</span>
+                          <span className="leaderboard-pick-col points-positive">{u.predictionWins ?? 0}</span>
+                          <span className="leaderboard-pick-col points-negative">{u.predictionWrongs ?? 0}</span>
+                          <span className="leaderboard-pick-col">{u.predictionNotPredicted ?? 0}</span>
+                          <span className="leaderboard-pick-col">{u.drawResultCount ?? 0}</span>
+                        </div>
+                      ))}
                     </div>
                   </>
                 )}
@@ -2422,8 +2602,53 @@ export default function Dashboard() {
                   </div>
                 );
               }
+              const ownChartSeries = [
+                {
+                  id: 'pred',
+                  label: 'Match prediction (running)',
+                  color: 'var(--accent)',
+                  points: rowsChrono.map((r) => ({
+                    xLabel: (r.m.date || '').slice(5) || `#${r.m.matchNumber || r.m.id}`,
+                    y: r.runningPred,
+                  })),
+                },
+              ];
+              if (cricketInsightsConfig.enabled) {
+                ownChartSeries.push({
+                  id: 'insight',
+                  label: 'Cricket insight (running)',
+                  color: '#1565c0',
+                  points: rowsChrono.map((r) => ({
+                    xLabel: (r.m.date || '').slice(5) || `#${r.m.matchNumber || r.m.id}`,
+                    y: r.runningInsight,
+                  })),
+                });
+              }
+
               return (
                 <div className="point-history-root">
+                  {completed.length > 0 && (
+                    <div className="point-history-view-toolbar" role="tablist" aria-label="History display">
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={ownPointHistoryView === 'list'}
+                        className={ownPointHistoryView === 'list' ? 'active' : ''}
+                        onClick={() => setOwnPointHistoryView('list')}
+                      >
+                        List
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={ownPointHistoryView === 'chart'}
+                        className={ownPointHistoryView === 'chart' ? 'active' : ''}
+                        onClick={() => setOwnPointHistoryView('chart')}
+                      >
+                        Chart
+                      </button>
+                    </div>
+                  )}
                   <div className="point-history-summary" role="region" aria-label="Totals">
                     <div className="point-history-summary-main">
                       <span className="point-history-summary-label">Match prediction total</span>
@@ -2453,7 +2678,16 @@ export default function Dashboard() {
                     entries={seasonEntries}
                     intro="Season challenges: points from correct picks when an admin scores each challenge (included in your leaderboard total above)."
                   />
-                  {completed.length > 0 && (
+                  {completed.length > 0 && ownPointHistoryView === 'chart' ? (
+                    <>
+                      <p className="point-history-intro point-history-intro--chart">
+                        Cumulative points after each completed match (oldest → newest). Green = match prediction; blue = cricket
+                        insight (if enabled).
+                      </p>
+                      <PointsHistoryChart series={ownChartSeries} height={240} />
+                    </>
+                  ) : null}
+                  {completed.length > 0 && ownPointHistoryView === 'list' ? (
                     <>
                   <p className="point-history-intro">
                     Newest matches first. Each row shows points for that match and your running match total after it.
@@ -2510,7 +2744,7 @@ export default function Dashboard() {
                     </ul>
                   </div>
                     </>
-                  )}
+                  ) : null}
                 </div>
               );
             })()}
@@ -2690,8 +2924,42 @@ export default function Dashboard() {
                 );
               }
 
+              const userHistoryChartSeries = [
+                {
+                  id: 'pred',
+                  label: 'Match prediction (running)',
+                  color: 'var(--accent)',
+                  points: rowsChrono.map((r) => ({
+                    xLabel: (r.m.date || '').slice(5) || `#${r.m.matchNumber || r.m.id}`,
+                    y: r.runningTotal,
+                  })),
+                },
+              ];
+
               return (
                 <div className="point-history-body">
+                  {completed.length > 0 && (
+                    <div className="point-history-view-toolbar" role="tablist" aria-label="History display">
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={userPointHistoryView === 'list'}
+                        className={userPointHistoryView === 'list' ? 'active' : ''}
+                        onClick={() => setUserPointHistoryView('list')}
+                      >
+                        List
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={userPointHistoryView === 'chart'}
+                        className={userPointHistoryView === 'chart' ? 'active' : ''}
+                        onClick={() => setUserPointHistoryView('chart')}
+                      >
+                        Chart
+                      </button>
+                    </div>
+                  )}
                   <div className="point-history-root">
                     <div className="point-history-summary" role="region" aria-label="Leaderboard totals">
                       <div className="point-history-summary-main">
@@ -2719,7 +2987,16 @@ export default function Dashboard() {
                       entries={lbSeasonEntries}
                       intro="Season challenges: challenge name and points from correct picks when the admin scored each one."
                     />
-                    {completed.length > 0 ? (
+                    {completed.length > 0 && userPointHistoryView === 'chart' ? (
+                      <>
+                        <p className="point-history-intro point-history-intro--chart">
+                          Cumulative match prediction points after each completed match (left = oldest, right = newest). Dates
+                          are MM-DD for the match day.
+                        </p>
+                        <PointsHistoryChart series={userHistoryChartSeries} height={220} />
+                      </>
+                    ) : null}
+                    {completed.length > 0 && userPointHistoryView === 'list' ? (
                       <>
                         <p className="point-history-intro">
                           Newest matches first. Running total is cumulative match prediction points after each completed match

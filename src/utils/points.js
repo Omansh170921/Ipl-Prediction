@@ -1,4 +1,4 @@
-import { isDrawOrCancelledWinner } from './matchOutcomes.js';
+import { hasTeamWinnerForScoring, isDrawOrCancelledWinner } from './matchOutcomes.js';
 
 export const to2Decimals = (n) => Math.round(Number(n) * 100) / 100;
 
@@ -108,6 +108,51 @@ export function calculateLeaderboard(completedMatches, allUsers, allPredictionsB
   });
 
   return totals;
+}
+
+/**
+ * Per user for team-winner matches: correct, wrong, not predicted.
+ * League-wide: drawResultCount = completed matches with draw or cancelled (no team winner).
+ */
+export function countPredictionPickStatsPerUser(completedMatches, users, predsByMatch) {
+  const correct = {};
+  const wrong = {};
+  const notPredicted = {};
+  (users || []).forEach((u) => {
+    correct[u.id] = 0;
+    wrong[u.id] = 0;
+    notPredicted[u.id] = 0;
+  });
+  let drawResultCount = 0;
+  (completedMatches || []).forEach((match) => {
+    const w = (match.winner || '').trim();
+    if (!w) return;
+    if (isDrawOrCancelledWinner(w)) {
+      drawResultCount += 1;
+      return;
+    }
+    if (!hasTeamWinnerForScoring(match)) return;
+    const mid = match.id != null ? String(match.id) : '';
+    const preds = predsByMatch?.[mid] || predsByMatch?.[match.id] || [];
+    const winnerNorm = w.toLowerCase().trim();
+    const predMap = new Map();
+    preds.forEach((p) => predMap.set(p.userId, p.predictedWinner));
+    (users || []).forEach((u) => {
+      const uid = u.id;
+      const pred = predMap.get(uid);
+      if (pred == null || String(pred).trim() === '') {
+        notPredicted[uid] = (notPredicted[uid] || 0) + 1;
+        return;
+      }
+      const predNorm = String(pred).toLowerCase().trim();
+      if (predNorm === winnerNorm) {
+        correct[uid] = (correct[uid] || 0) + 1;
+      } else {
+        wrong[uid] = (wrong[uid] || 0) + 1;
+      }
+    });
+  });
+  return { correct, wrong, notPredicted, drawResultCount };
 }
 
 /**
