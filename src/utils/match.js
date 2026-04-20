@@ -21,54 +21,6 @@ export function isPredictionEligible(match) {
   return new Date() < cutoff;
 }
 
-/**
- * Extra minutes after the normal cutoff during which users who have not yet predicted may submit a first pick only.
- * From settings/programConfig; default 0 (disabled).
- * @param {{ extraFirstPredictionMinutesAfterCutoff?: number | string } | null | undefined} programConfig
- */
-export function getExtraFirstPredictionMinutesAfterCutoff(programConfig) {
-  const raw = programConfig?.extraFirstPredictionMinutesAfterCutoff;
-  if (raw == null || raw === '') return 0;
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.min(24 * 60, n));
-}
-
-/**
- * Last instant a first-time prediction is allowed (cutoff + extra minutes from config, or match.firstPredictionGraceEndsAt from Firestore).
- * @param {{ date?: string, thresholdTime?: string, time?: string, firstPredictionGraceEndsAt?: unknown } | null | undefined} match
- * @param {{ extraFirstPredictionMinutesAfterCutoff?: number | string } | null | undefined} programConfig
- * @returns {Date | null}
- */
-export function getFirstPredictionGraceEndDate(match, programConfig) {
-  const ts = match?.firstPredictionGraceEndsAt;
-  if (ts && typeof ts.toDate === 'function') {
-    const d = ts.toDate();
-    return Number.isNaN(d.getTime()) ? null : d;
-  }
-  if (ts && typeof ts.seconds === 'number') {
-    return new Date(ts.seconds * 1000);
-  }
-  const cutoff = getMatchPredictionCutoffDate(match);
-  if (!cutoff) return null;
-  const extraMin = getExtraFirstPredictionMinutesAfterCutoff(programConfig);
-  return new Date(cutoff.getTime() + extraMin * 60 * 1000);
-}
-
-/**
- * User may submit a first prediction (no saved doc yet) until grace end.
- * After the strict cutoff, extra time applies only if match.firstPredictionGraceEndsAt is set (admin saved the match).
- */
-export function canSubmitFirstPrediction(match, programConfig) {
-  const cutoff = getMatchPredictionCutoffDate(match);
-  if (!cutoff) return false;
-  const now = new Date();
-  if (now < cutoff) return true;
-  const graceEnd = getFirstPredictionGraceEndDate(match, programConfig);
-  if (!graceEnd || now >= graceEnd) return false;
-  return match?.firstPredictionGraceEndsAt != null;
-}
-
 /** @typedef {'always' | 'afterCutoff'} CrowdVisibilityMode */
 
 /**

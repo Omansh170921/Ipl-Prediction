@@ -16,6 +16,17 @@ service cloud.firestore {
       );
     }
 
+    // Match UI / legacy docs that store flags as bool, string, or number
+    function firestoreTruthy(v) {
+      return v == true || v == 'true' || v == 1;
+    }
+
+    function predictionContextUserPicksOpen(contextId) {
+      let ctx = get(/databases/$(database)/documents/prediction_contexts/$(contextId)).data;
+      return firestoreTruthy(ctx.active) && firestoreTruthy(ctx.acceptingPredictions) &&
+        (ctx.deadlineAt == null || request.time <= ctx.deadlineAt);
+    }
+
     // Cricket insight answers: only while match is not completed (match doc status != 'completed')
     function insightMatchNotCompleted(questionId) {
       return exists(/databases/$(database)/documents/cricket_questions/$(questionId)) &&
@@ -31,19 +42,6 @@ service cloud.firestore {
       return !exists(/databases/$(database)/documents/matches/$(matchId)) ||
         get(/databases/$(database)/documents/matches/$(matchId)).data.predictionCutoffAt == null ||
         request.time < get(/databases/$(database)/documents/matches/$(matchId)).data.predictionCutoffAt;
-    }
-
-    // First-time prediction allowed until firstPredictionGraceEndsAt (cutoff + extra minutes); set when admin saves match.
-    function matchFirstPredictionWindowOpen(matchId) {
-      return !exists(/databases/$(database)/documents/matches/$(matchId)) ||
-        (
-          get(/databases/$(database)/documents/matches/$(matchId)).data.firstPredictionGraceEndsAt != null &&
-          request.time < get(/databases/$(database)/documents/matches/$(matchId)).data.firstPredictionGraceEndsAt
-        ) ||
-        (
-          get(/databases/$(database)/documents/matches/$(matchId)).data.firstPredictionGraceEndsAt == null &&
-          matchPredictionWindowOpen(matchId)
-        );
     }
 
     // settings/cricketInsights: allowInsightQuestionsAfterPredictionCutoff / allowInsightAnswersAfterPredictionCutoff
@@ -130,18 +128,11 @@ service cloud.firestore {
     }
 
     // Predictions: any logged-in user can READ all (admin needs this for calculate points)
-    // Create: until first-pick grace end. Update: only until strict cutoff (no grace for changes).
+    // Users can CREATE/UPDATE/DELETE their own prediction (delete for account surrender)
     match /predictions/{docId} {
       allow read: if request.auth != null;
-      allow create: if request.auth != null &&
-        request.resource.data.userId == request.auth.uid &&
-        request.resource.data.keys().hasAll(['userId', 'matchId', 'predictedWinner']) &&
-        matchFirstPredictionWindowOpen(request.resource.data.matchId);
-      allow update: if request.auth != null &&
-        request.resource.data.userId == request.auth.uid &&
-        resource.data.userId == request.auth.uid &&
-        request.resource.data.matchId == resource.data.matchId &&
-        matchPredictionWindowOpen(resource.data.matchId);
+      allow create, update: if request.auth != null &&
+        request.resource.data.userId == request.auth.uid;
       allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
     }
 
@@ -192,16 +183,12 @@ service cloud.firestore {
           predictionContextDeadlineHasPassed(contextId)
         );
         allow create: if request.auth != null && request.auth.uid == userId &&
-          get(/databases/$(database)/documents/prediction_contexts/$(contextId)).data.active == true &&
-          get(/databases/$(database)/documents/prediction_contexts/$(contextId)).data.acceptingPredictions == true &&
-          !predictionContextDeadlineHasPassed(contextId);
+          predictionContextUserPicksOpen(contextId);
         allow update: if isAdmin() ||
           (request.auth != null && request.auth.uid == userId &&
-            get(/databases/$(database)/documents/prediction_contexts/$(contextId)).data.active == true &&
-            get(/databases/$(database)/documents/prediction_contexts/$(contextId)).data.acceptingPredictions == true &&
-            !predictionContextDeadlineHasPassed(contextId));
+            predictionContextUserPicksOpen(contextId));
         allow delete: if isAdmin() || (request.auth != null && request.auth.uid == userId &&
-          get(/databases/$(database)/documents/prediction_contexts/$(contextId)).data.acceptingPredictions == true &&
+          firestoreTruthy(get(/databases/$(database)/documents/prediction_contexts/$(contextId)).data.acceptingPredictions) &&
           !predictionContextDeadlineHasPassed(contextId));
       }
     }

@@ -3736,99 +3736,6 @@ button.stat-card.stat-card-clickable.stat-card--win-loss:hover {
   color: var(--cricket-green);
 }
 
-.point-history-view-toolbar {
-  display: flex;
-  gap: 0.35rem;
-  margin: 0 0 0.5rem 0;
-  padding-bottom: 0.5rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.point-history-view-toolbar button {
-  padding: 0.35rem 0.85rem;
-  font-size: 0.85rem;
-  font-weight: 600;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--card-bg);
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-}
-
-.point-history-view-toolbar button:hover {
-  border-color: var(--accent);
-  color: var(--text);
-}
-
-.point-history-view-toolbar button.active {
-  background: rgba(46, 125, 50, 0.12);
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.point-history-intro--chart {
-  margin-top: 0.75rem;
-}
-
-.points-history-chart-wrap {
-  width: 100%;
-  margin: 0.5rem 0 0.25rem;
-}
-
-.points-history-chart-svg {
-  width: 100%;
-  height: auto;
-  display: block;
-  max-height: 300px;
-}
-
-.points-history-chart-grid {
-  stroke: var(--border);
-  stroke-opacity: 0.9;
-}
-
-.points-history-chart-zero {
-  stroke: var(--text-muted);
-  stroke-opacity: 0.45;
-  stroke-dasharray: 4 3;
-}
-
-.points-history-chart-axis-text,
-.points-history-chart-x-text {
-  font-size: 10px;
-  fill: var(--text-muted);
-}
-
-.points-history-chart-dot {
-  stroke-width: 1.5;
-}
-
-.points-history-chart-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.65rem 1.1rem;
-  list-style: none;
-  margin: 0.65rem 0 0;
-  padding: 0;
-  font-size: 0.8rem;
-  color: var(--text-muted);
-}
-
-.points-history-chart-legend-swatch {
-  display: inline-block;
-  width: 0.65rem;
-  height: 0.65rem;
-  border-radius: 2px;
-  margin-right: 0.35rem;
-  vertical-align: middle;
-}
-
-.points-history-chart-empty {
-  margin: 0.75rem 0;
-  text-align: center;
-}
-
 @media (max-width: 380px) {
   .point-history-dl {
     grid-template-columns: 1fr;
@@ -4840,32 +4747,6 @@ button.stat-card.stat-card-clickable.stat-card--win-loss:hover {
   grid-template-columns: 52px 52px 1fr 80px 44px;
 }
 
-.leaderboard-table.leaderboard-table--pick-counts .leaderboard-header,
-.leaderboard-table.leaderboard-table--pick-counts .leaderboard-row {
-  grid-template-columns: 1fr 4.25rem 4.25rem 4.75rem 4rem;
-}
-
-.leaderboard-table.leaderboard-table--pick-counts .leaderboard-pick-col {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-.leaderboard-table.leaderboard-table--pick-counts .leaderboard-pick-name {
-  font-weight: 600;
-  color: var(--text);
-}
-
-.leaderboard-table.leaderboard-table--pick-counts .leaderboard-header > span:nth-child(1) {
-  text-align: left;
-}
-
-.leaderboard-table.leaderboard-table--pick-counts .leaderboard-header > span:nth-child(2),
-.leaderboard-table.leaderboard-table--pick-counts .leaderboard-header > span:nth-child(3),
-.leaderboard-table.leaderboard-table--pick-counts .leaderboard-header > span:nth-child(4),
-.leaderboard-table.leaderboard-table--pick-counts .leaderboard-header > span:nth-child(5) {
-  text-align: right;
-}
-
 .leaderboard-wl-symbol {
   font-size: 1.2rem;
   text-align: center;
@@ -5352,38 +5233,9 @@ button.stat-card.stat-card-clickable.stat-card--win-loss:hover {
     min-width: 22rem;
   }
 
-  .leaderboard-table.leaderboard-table--pick-counts .leaderboard-header,
-  .leaderboard-table.leaderboard-table--pick-counts .leaderboard-row {
-    grid-template-columns:
-      minmax(5.5rem, 1fr) minmax(2.75rem, 3.75rem) minmax(2.75rem, 3.75rem) minmax(3rem, 4.25rem) minmax(2.5rem, 3.5rem);
-    min-width: 0;
-  }
-
   .leaderboard-row > span:nth-child(1),
   .leaderboard-row > span:nth-child(2) {
     text-align: center;
-  }
-
-  .leaderboard-table.leaderboard-table--pick-counts .leaderboard-row > span:nth-child(1) {
-    text-align: left;
-  }
-
-  .leaderboard-table.leaderboard-table--pick-counts .leaderboard-row > span:nth-child(2),
-  .leaderboard-table.leaderboard-table--pick-counts .leaderboard-row > span:nth-child(3),
-  .leaderboard-table.leaderboard-table--pick-counts .leaderboard-row > span:nth-child(4),
-  .leaderboard-table.leaderboard-table--pick-counts .leaderboard-row > span:nth-child(5) {
-    text-align: right;
-  }
-
-  .leaderboard-table.leaderboard-table--pick-counts .leaderboard-header > span:nth-child(1) {
-    text-align: left;
-  }
-
-  .leaderboard-table.leaderboard-table--pick-counts .leaderboard-header > span:nth-child(2),
-  .leaderboard-table.leaderboard-table--pick-counts .leaderboard-header > span:nth-child(3),
-  .leaderboard-table.leaderboard-table--pick-counts .leaderboard-header > span:nth-child(4),
-  .leaderboard-table.leaderboard-table--pick-counts .leaderboard-header > span:nth-child(5) {
-    text-align: right;
   }
 
   .leaderboard-username-btn {

@@ -12,11 +12,7 @@ import {
   MATCH_WINNER_CANCELLED,
   getMatchResultLabel,
 } from '../utils/matchOutcomes';
-import {
-  getMatchPredictionCutoffDate,
-  getExtraFirstPredictionMinutesAfterCutoff,
-  isPredictionEligible,
-} from '../utils/match';
+import { getMatchPredictionCutoffDate, isPredictionEligible } from '../utils/match';
 import { getAppTodayDate } from '../utils/calendarDate';
 import { getPredictionSavedIso, formatTimeHH24 } from '../utils/predictionTime';
 import { formatInsightUserLabel } from '../utils/insightQuestions';
@@ -24,15 +20,12 @@ import { getInsightWrongAnswerPenalty, insightPointDeltaOnAnswerChange } from '.
 import PredictionContextsAdminPanel from '../components/PredictionContextsAdminPanel';
 import * as XLSX from 'xlsx';
 
-/** Persists server-side cutoff + first-pick grace end for Firestore rules (predictions create vs update). */
-function withPredictionCutoffAt(matchFields, programConfig) {
+/** Persists server-side cutoff for Firestore rules (Cricket Insights + predictions). */
+function withPredictionCutoffAt(matchFields) {
   const cutoff = getMatchPredictionCutoffDate(matchFields);
-  const extraMin = programConfig != null ? getExtraFirstPredictionMinutesAfterCutoff(programConfig) : 0;
-  const graceEnd = cutoff ? new Date(cutoff.getTime() + extraMin * 60 * 1000) : null;
   return {
     ...matchFields,
     ...(cutoff ? { predictionCutoffAt: Timestamp.fromDate(cutoff) } : {}),
-    ...(graceEnd ? { firstPredictionGraceEndsAt: Timestamp.fromDate(graceEnd) } : {}),
   };
 }
 
@@ -209,7 +202,6 @@ export default function Admin() {
     loserPercent: 25,
     crowdPredictionVisibility: 'always',
     crowdPredictionMinutesAfterCutoff: 10,
-    extraFirstPredictionMinutesAfterCutoff: 0,
     notifyOnPointsCalculated: true,
   });
   const [cricketInsightsConfig, setCricketInsightsConfig] = useState({
@@ -378,10 +370,6 @@ export default function Admin() {
               d.crowdPredictionMinutesAfterCutoff != null && d.crowdPredictionMinutesAfterCutoff !== ''
                 ? Number(d.crowdPredictionMinutesAfterCutoff)
                 : 10,
-            extraFirstPredictionMinutesAfterCutoff:
-              d.extraFirstPredictionMinutesAfterCutoff != null && d.extraFirstPredictionMinutesAfterCutoff !== ''
-                ? Number(d.extraFirstPredictionMinutesAfterCutoff)
-                : 0,
             notifyOnPointsCalculated: d.notifyOnPointsCalculated !== false,
           });
         }
@@ -915,14 +903,11 @@ export default function Admin() {
         const ref = doc(collection(db, 'matches'));
         batch.set(
           ref,
-          withPredictionCutoffAt(
-            {
-              ...m,
-              createdBy: user.uid,
-              createdAt,
-            },
-            programConfig
-          )
+          withPredictionCutoffAt({
+            ...m,
+            createdBy: user.uid,
+            createdAt,
+          })
         );
         n += 1;
         if (n >= BATCH) {
@@ -1062,23 +1047,20 @@ export default function Admin() {
     try {
       await addDoc(
         collection(db, 'matches'),
-        withPredictionCutoffAt(
-          {
-            matchNumber,
-            team1: matchForm.team1,
-            team2: matchForm.team2,
-            date: matchForm.date,
-            time: matchForm.time || '19:00',
-            thresholdTime: matchForm.thresholdTime || '18:00',
-            status: 'open',
-            ...(stadium ? { stadium } : {}),
-            ...(city ? { city } : {}),
-            ...(crowd === 'always' || crowd === 'afterCutoff' ? { crowdPredictionVisibility: crowd } : {}),
-            createdBy: user.uid,
-            createdAt: new Date().toISOString(),
-          },
-          programConfig
-        )
+        withPredictionCutoffAt({
+          matchNumber,
+          team1: matchForm.team1,
+          team2: matchForm.team2,
+          date: matchForm.date,
+          time: matchForm.time || '19:00',
+          thresholdTime: matchForm.thresholdTime || '18:00',
+          status: 'open',
+          ...(stadium ? { stadium } : {}),
+          ...(city ? { city } : {}),
+          ...(crowd === 'always' || crowd === 'afterCutoff' ? { crowdPredictionVisibility: crowd } : {}),
+          createdBy: user.uid,
+          createdAt: new Date().toISOString(),
+        })
       );
       setMatchForm(prev => ({
         matchNumber: '',
@@ -1161,23 +1143,20 @@ export default function Admin() {
           : undefined;
       await updateDoc(
         doc(db, 'matches', editingMatch.id),
-        withPredictionCutoffAt(
-          {
-            matchNumber: (editingMatch.matchNumber || '').toString().trim(),
-            team1: editingMatch.team1,
-            team2: editingMatch.team2,
-            date: editingMatch.date,
-            time: editingMatch.time,
-            thresholdTime: editingMatch.thresholdTime,
-            status: editingMatch.status || 'open',
-            winner: editingMatch.winner || null,
-            stadium: est || null,
-            city: ecity || null,
-            ...(pointResultsForNoScore ? { pointResults: pointResultsForNoScore } : {}),
-            ...crowdPatch,
-          },
-          programConfig
-        )
+        withPredictionCutoffAt({
+          matchNumber: (editingMatch.matchNumber || '').toString().trim(),
+          team1: editingMatch.team1,
+          team2: editingMatch.team2,
+          date: editingMatch.date,
+          time: editingMatch.time,
+          thresholdTime: editingMatch.thresholdTime,
+          status: editingMatch.status || 'open',
+          winner: editingMatch.winner || null,
+          stadium: est || null,
+          city: ecity || null,
+          ...(pointResultsForNoScore ? { pointResults: pointResultsForNoScore } : {}),
+          ...crowdPatch,
+        })
       );
       setEditingMatch(null);
       setMessage('Match updated successfully');
@@ -1490,11 +1469,6 @@ export default function Admin() {
         rawCrowdDelay != null && rawCrowdDelay !== '' && Number.isFinite(Number(rawCrowdDelay))
           ? Math.max(0, Math.min(24 * 60, Number(rawCrowdDelay)))
           : 10;
-      const rawExtraFirst = programConfig.extraFirstPredictionMinutesAfterCutoff;
-      const extraFirstPredictionMinutesAfterCutoff =
-        rawExtraFirst != null && rawExtraFirst !== '' && Number.isFinite(Number(rawExtraFirst))
-          ? Math.max(0, Math.min(24 * 60, Number(rawExtraFirst)))
-          : 0;
       const notifyOnPointsCalculated = programConfig.notifyOnPointsCalculated !== false;
       await Promise.all([
         setDoc(doc(db, 'rules', 'pointRules'), {
@@ -1508,7 +1482,6 @@ export default function Admin() {
           loserPercent: loserPercent,
           crowdPredictionVisibility,
           crowdPredictionMinutesAfterCutoff,
-          extraFirstPredictionMinutesAfterCutoff,
           notifyOnPointsCalculated,
           updatedAt: new Date().toISOString(),
         }),
@@ -1554,7 +1527,6 @@ export default function Admin() {
         loserPercent,
         crowdPredictionVisibility,
         crowdPredictionMinutesAfterCutoff,
-        extraFirstPredictionMinutesAfterCutoff,
         notifyOnPointsCalculated,
       }));
       setPasswordPolicy(prev => ({ ...prev, maxPasswordChanges: max, surrenderDeadline: deadline }));
@@ -2051,29 +2023,6 @@ export default function Admin() {
                     When “after cutoff + delay” is selected (globally or per match), crowd percentages appear only after
                     the match’s prediction cutoff time plus this many minutes (default 10). Per-match overrides can still
                     choose always vs delayed visibility when adding or editing a match.
-                  </p>
-                  <div className="config-item">
-                    <label htmlFor="extra-first-pred-minutes">
-                      Extra minutes after cutoff (first prediction only):
-                    </label>
-                    <input
-                      id="extra-first-pred-minutes"
-                      type="number"
-                      min="0"
-                      max="1440"
-                      value={programConfig.extraFirstPredictionMinutesAfterCutoff ?? 0}
-                      onChange={(e) =>
-                        setProgramConfig((prev) => ({
-                          ...prev,
-                          extraFirstPredictionMinutesAfterCutoff: e.target.value,
-                        }))
-                      }
-                    />
-                  </div>
-                  <p className="muted config-note">
-                    Users who have not yet saved a pick for a match may submit one until this many minutes after the
-                    normal prediction cutoff. Changing an existing pick is never allowed after the cutoff. Re-save or edit
-                    matches in Admin so stored grace times match this setting.
                   </p>
                 </div>
                 <div className="config-card">
