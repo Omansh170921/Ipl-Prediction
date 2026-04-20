@@ -20,6 +20,7 @@ import Sidebar from '../components/Sidebar';
 import { toInitCap } from '../utils/format';
 import { getAppTodayDate } from '../utils/calendarDate';
 import { formatInsightUserLabel } from '../utils/insightQuestions';
+import { getInsightWrongAnswerPenalty } from '../utils/insightScoring';
 
 function formatMatchTime(time) {
   if (!time) return 'TBD';
@@ -59,6 +60,11 @@ export default function InsightApproval() {
   const [expandedInsightMatchId, setExpandedInsightMatchId] = useState(null);
   const [requiredApprovals, setRequiredApprovals] = useState(1);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  /** For insight scoring (+1 / −penalty) when setting correct answer */
+  const [insightPenaltyCtx, setInsightPenaltyCtx] = useState({
+    cricketInsightsConfig: {},
+    pointRules: { wrongPredictionPoints: 5 },
+  });
 
   const todayCal = getAppTodayDate();
 
@@ -75,9 +81,10 @@ export default function InsightApproval() {
       if (!user) return;
       setLoading(true);
       try {
-        const [ciSnap, approverSnap] = await Promise.all([
+        const [ciSnap, approverSnap, ptSnap] = await Promise.all([
           getDoc(doc(db, 'settings', 'cricketInsights')),
           getDoc(doc(db, 'insight_approvers', user.uid)),
+          getDoc(doc(db, 'rules', 'pointRules')),
         ]);
         const isAdmin = userProfile?.isAdmin === true || userProfile?.isAdmin === 'true';
         const isApprover = approverSnap?.exists?.();
@@ -85,6 +92,10 @@ export default function InsightApproval() {
         const inApproverList = approverIds.includes(user.uid);
         const req = ciSnap.exists?.() ? (ciSnap.data().requiredApprovals ?? 1) : 1;
         setRequiredApprovals(Math.max(1, Math.min(10, parseInt(req, 10) || 1)));
+        setInsightPenaltyCtx({
+          cricketInsightsConfig: ciSnap.exists?.() ? ciSnap.data() : {},
+          pointRules: ptSnap?.exists?.() ? ptSnap.data() : { wrongPredictionPoints: 5 },
+        });
         if (!isAdmin && !isApprover && !inApproverList) {
           setAuthorized(false);
           setLoading(false);
@@ -212,22 +223,33 @@ export default function InsightApproval() {
       });
       const answersSnap = await getDocs(query(collection(db, 'cricket_answers'), where('questionId', '==', q.id)));
       const correctAnswerNorm = String(correctAnswerInput).trim().toLowerCase();
+      const penalty = getInsightWrongAnswerPenalty(insightPenaltyCtx);
       const winners = answersSnap.docs
         .map(d => ({ ...d.data(), id: d.id }))
         .filter(a => String(a.answer || '').trim().toLowerCase() === correctAnswerNorm);
+      const losers = answersSnap.docs
+        .map(d => ({ ...d.data(), id: d.id }))
+        .filter(a => String(a.answer || '').trim().toLowerCase() !== correctAnswerNorm);
       const matchId = q.matchId;
       if (matchId) {
         const updates = {};
         winners.forEach(w => {
           if (w.userId) updates[`insightPointResults.${w.userId}`] = increment(1);
         });
+        if (penalty > 0) {
+          losers.forEach((w) => {
+            if (w.userId) updates[`insightPointResults.${w.userId}`] = increment(-penalty);
+          });
+        }
         if (Object.keys(updates).length > 0) {
           await updateDoc(doc(db, 'matches', matchId), updates);
         }
       }
       setAnswerModalQuestion(null);
       setCorrectAnswerInput('');
-      setMessage(`Correct answer set. ${winners.length} user(s) awarded +1 point.`);
+      setMessage(
+        `Correct answer set. ${winners.length} user(s) +1 pt${penalty > 0 ? `; ${losers.length} wrong −${penalty} each` : ''}.`
+      );
       await refreshQuestions();
     } catch (err) {
       setMessage('Error: ' + (err.message || ''));

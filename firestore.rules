@@ -26,6 +26,46 @@ service cloud.firestore {
         );
     }
 
+    // Match prediction cutoff (Timestamp); set when admin saves match. If missing, legacy matches skip this check.
+    function matchPredictionWindowOpen(matchId) {
+      return !exists(/databases/$(database)/documents/matches/$(matchId)) ||
+        get(/databases/$(database)/documents/matches/$(matchId)).data.predictionCutoffAt == null ||
+        request.time < get(/databases/$(database)/documents/matches/$(matchId)).data.predictionCutoffAt;
+    }
+
+    // First-time prediction allowed until firstPredictionGraceEndsAt (cutoff + extra minutes); set when admin saves match.
+    function matchFirstPredictionWindowOpen(matchId) {
+      return !exists(/databases/$(database)/documents/matches/$(matchId)) ||
+        (
+          get(/databases/$(database)/documents/matches/$(matchId)).data.firstPredictionGraceEndsAt != null &&
+          request.time < get(/databases/$(database)/documents/matches/$(matchId)).data.firstPredictionGraceEndsAt
+        ) ||
+        (
+          get(/databases/$(database)/documents/matches/$(matchId)).data.firstPredictionGraceEndsAt == null &&
+          matchPredictionWindowOpen(matchId)
+        );
+    }
+
+    // settings/cricketInsights: allowInsightQuestionsAfterPredictionCutoff / allowInsightAnswersAfterPredictionCutoff
+    function cricketInsightsAllowQuestionsAfterCutoff() {
+      return exists(/databases/$(database)/documents/settings/cricketInsights) &&
+        get(/databases/$(database)/documents/settings/cricketInsights).data.allowInsightQuestionsAfterPredictionCutoff == true;
+    }
+
+    function cricketInsightsAllowAnswersAfterCutoff() {
+      return exists(/databases/$(database)/documents/settings/cricketInsights) &&
+        get(/databases/$(database)/documents/settings/cricketInsights).data.allowInsightAnswersAfterPredictionCutoff == true;
+    }
+
+    function matchAllowsInsightQuestions(matchId) {
+      return matchId == null || matchPredictionWindowOpen(matchId) || cricketInsightsAllowQuestionsAfterCutoff();
+    }
+
+    function insightAnswersMatchPredictionOpen(questionId) {
+      let mid = get(/databases/$(database)/documents/cricket_questions/$(questionId)).data.matchId;
+      return mid == null || matchPredictionWindowOpen(mid) || cricketInsightsAllowAnswersAfterCutoff();
+    }
+
     // True when this context exists and is still accepting predictions (only own response readable by non-admins).
     function predictionContextPicksAreOpen(contextId) {
       return exists(/databases/$(database)/documents/prediction_contexts/$(contextId)) &&
@@ -90,11 +130,18 @@ service cloud.firestore {
     }
 
     // Predictions: any logged-in user can READ all (admin needs this for calculate points)
-    // Users can CREATE/UPDATE/DELETE their own prediction (delete for account surrender)
+    // Create: until first-pick grace end. Update: only until strict cutoff (no grace for changes).
     match /predictions/{docId} {
       allow read: if request.auth != null;
-      allow create, update: if request.auth != null &&
-        request.resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.keys().hasAll(['userId', 'matchId', 'predictedWinner']) &&
+        matchFirstPredictionWindowOpen(request.resource.data.matchId);
+      allow update: if request.auth != null &&
+        request.resource.data.userId == request.auth.uid &&
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.matchId == resource.data.matchId &&
+        matchPredictionWindowOpen(resource.data.matchId);
       allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
     }
 
@@ -108,7 +155,8 @@ service cloud.firestore {
     // Only admins may change answersDisabled / answersDisabledAt / answersDisabledBy.
     match /cricket_questions/{docId} {
       allow read: if request.auth != null;
-      allow create: if request.auth != null;
+      allow create: if request.auth != null &&
+        matchAllowsInsightQuestions(request.resource.data.matchId);
       allow update: if isAdmin() ||
         (request.auth != null && exists(/databases/$(database)/documents/insight_approvers/$(request.auth.uid)) &&
           !request.resource.data.diff(resource.data).changedKeys().hasAny(['answersDisabled', 'answersDisabledAt', 'answersDisabledBy']));
@@ -121,9 +169,11 @@ service cloud.firestore {
       allow create: if request.auth != null && request.resource.data.userId == request.auth.uid &&
         exists(/databases/$(database)/documents/cricket_questions/$(request.resource.data.questionId)) &&
         get(/databases/$(database)/documents/cricket_questions/$(request.resource.data.questionId)).data.answersDisabled != true &&
-        insightMatchNotCompleted(request.resource.data.questionId);
+        insightMatchNotCompleted(request.resource.data.questionId) &&
+        insightAnswersMatchPredictionOpen(request.resource.data.questionId);
       allow update, delete: if request.auth != null && resource.data.userId == request.auth.uid &&
-        insightMatchNotCompleted(resource.data.questionId);
+        insightMatchNotCompleted(resource.data.questionId) &&
+        insightAnswersMatchPredictionOpen(resource.data.questionId);
     }
 
     // Prediction contexts (e.g. quarter-final qualifiers): admin defines tiers; users submit team picks under open context

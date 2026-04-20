@@ -3,6 +3,7 @@ import { collection, addDoc, getDocs, query, where, deleteDoc, doc } from 'fireb
 import { db } from '../firebase/config';
 import { useAuth } from '../context/AuthContext';
 import { getAppTodayDate } from '../utils/calendarDate';
+import { isPredictionEligible } from '../utils/match';
 import {
   insightQuestionCountsTowardLimits,
   isInsightQuestionAnswerableInUi,
@@ -18,7 +19,7 @@ const QUESTION_TYPES = [
   { value: 'multiple', label: 'Multiple Choice', options: [] },
 ];
 
-export default function CricketInsights({ matchId, matchDate, matchStatus, config = {} }) {
+export default function CricketInsights({ matchId, matchDate, matchStatus, match: matchDoc, config = {} }) {
   const { user, userProfile } = useAuth();
   const maxPerUser = Math.max(1, parseInt(config.maxQuestionsPerUserPerMatch, 10) || 1);
   const maxPerMatch = Math.max(1, parseInt(config.maxQuestionsPerMatch, 10) || 5);
@@ -134,6 +135,15 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
       setError('Match completed. Questions can no longer be asked.');
       return;
     }
+    const windowOpen = matchDoc && matchDoc.date ? isPredictionEligible(matchDoc) : false;
+    const allowQuestions =
+      windowOpen || config.allowInsightQuestionsAfterPredictionCutoff === true;
+    if (matchDoc && !allowQuestions) {
+      setError(
+        'Prediction cutoff has passed. You cannot submit new insight questions (unless your admin allows after-cutoff in program settings).'
+      );
+      return;
+    }
     if (!questionTitle.trim() || !user) {
       setError('Please enter a question title.');
       return;
@@ -201,6 +211,15 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
       setError('This match is completed. You can no longer submit or change insight answers.');
       return;
     }
+    const windowOpenAns = matchDoc && matchDoc.date ? isPredictionEligible(matchDoc) : false;
+    const allowAnswers =
+      windowOpenAns || config.allowInsightAnswersAfterPredictionCutoff === true;
+    if (matchDoc && !allowAnswers) {
+      setError(
+        'Prediction cutoff has passed. You can no longer submit insight answers (unless your admin allows after-cutoff in program settings).'
+      );
+      return;
+    }
     if (q.answersDisabled === true || !isInsightQuestionAnswerableInUi(q)) {
       setError('Answers are closed for this question.');
       return;
@@ -266,11 +285,22 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
   const today = getAppTodayDate();
   const isTodayMatch = (matchDate || '') === today;
   const isMatchCompleted = (matchStatus || '').toLowerCase() === 'completed';
+  const predictionWindowOpen = matchDoc && matchDoc.date ? isPredictionEligible(matchDoc) : false;
+  const eligibleForQuestions =
+    predictionWindowOpen || config.allowInsightQuestionsAfterPredictionCutoff === true;
+  const eligibleForAnswers =
+    predictionWindowOpen || config.allowInsightAnswersAfterPredictionCutoff === true;
   const myQuestionCount = allMatchQuestions.filter(
     q => q.createdBy === user?.uid && insightQuestionCountsTowardLimits(q)
   ).length;
   const totalCount = allMatchQuestions.filter(insightQuestionCountsTowardLimits).length;
-  const canAskQuestion = user && isTodayMatch && !isMatchCompleted && myQuestionCount < maxPerUser && totalCount < maxPerMatch;
+  const canAskQuestion =
+    user &&
+    isTodayMatch &&
+    !isMatchCompleted &&
+    eligibleForQuestions &&
+    myQuestionCount < maxPerUser &&
+    totalCount < maxPerMatch;
 
   return (
     <div className="cricket-insights-inline">
@@ -278,7 +308,9 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
       <p className="muted insight-section-desc">
         {isMatchCompleted
           ? 'This match is completed. You can view questions and official answers; new answers and edits are not allowed.'
-          : 'Ask or answer questions for this match. +1 point for correct answers.'}
+          : !predictionWindowOpen && !isMatchCompleted && !eligibleForQuestions && !eligibleForAnswers
+            ? 'Prediction cutoff has passed. New questions and answers are disabled unless your admin enables after-cutoff options in program settings. When the official answer is set: +1 for correct; wrong answers may deduct points (see program config).'
+            : 'Ask or answer questions for this match. +1 for correct answers; wrong answers may deduct points when the admin sets the official answer (program config).'}
       </p>
       {error && <div className="alert alert-error" role="alert">{error}</div>}
       {success && <div className="alert alert-success" role="alert">{success}</div>}
@@ -290,6 +322,8 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
         user && (
           isMatchCompleted
             ? <p className="muted">Match completed. Questions can no longer be asked.</p>
+            : !eligibleForQuestions && isTodayMatch
+              ? <p className="muted">Prediction cutoff has passed. New insight questions cannot be raised (unless your admin allows after-cutoff in program settings).</p>
             : !isTodayMatch
               ? <p className="muted">Questions can only be asked for today&apos;s matches.</p>
               : totalCount >= maxPerMatch
@@ -317,7 +351,11 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
             const officialCorrect = (q.correctAnswer != null && String(q.correctAnswer).trim() !== '')
               ? String(q.correctAnswer).trim()
               : null;
-            const canSubmit = !answered && isInsightQuestionAnswerableInUi(q) && !isMatchCompleted;
+            const canSubmit =
+              !answered &&
+              isInsightQuestionAnswerableInUi(q) &&
+              !isMatchCompleted &&
+              eligibleForAnswers;
             return (
               <div key={qid} className="insight-question-card">
                 <div className="insight-question-header">
@@ -343,6 +381,9 @@ export default function CricketInsights({ matchId, matchDate, matchStatus, confi
                 )}
                 {q.answersDisabled === true && !answered && !isMatchCompleted && (
                   <p className="muted insight-answers-closed">Answers are closed for this question.</p>
+                )}
+                {!answered && !eligibleForAnswers && !isMatchCompleted && isInsightQuestionAnswerableInUi(q) && (
+                  <p className="muted insight-answers-closed">Prediction cutoff has passed. You can no longer submit an answer (unless your admin allows after-cutoff in program settings).</p>
                 )}
                 {answered && (
                   <div className="insight-answer-summary">

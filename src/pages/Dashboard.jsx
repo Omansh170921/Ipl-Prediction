@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useReducer } from 'react';
 import { createPortal } from 'react-dom';
 import { useAutoDismiss } from '../hooks/useAutoDismiss';
 import { useLocation, useSearchParams } from 'react-router-dom';
@@ -18,7 +18,12 @@ import {
   to2Decimals,
   sumSeasonContestLeaderboardPoints,
 } from '../utils/points';
-import { isPredictionEligible, shouldShowCrowdPrediction } from '../utils/match';
+import {
+  canSubmitFirstPrediction,
+  getFirstPredictionGraceEndDate,
+  isPredictionEligible,
+  shouldShowCrowdPrediction,
+} from '../utils/match';
 import { getPredictionSavedIso, formatTimeHH24 } from '../utils/predictionTime';
 import {
   isMatchCompletedWithResult,
@@ -337,6 +342,23 @@ function canUserPredict(userProfile, programConfig) {
   return isUserPredictionApproved(userProfile);
 }
 
+/** Show predict controls: normal window open, or first pick still allowed in grace (no saved prediction). */
+function canShowMatchPredictionControls(match, programConfig, userProfile, savedMatchIds) {
+  if (!canUserPredict(userProfile, programConfig)) return false;
+  if (isPredictionEligible(match)) return true;
+  if (!savedMatchIds.has(String(match.id)) && canSubmitFirstPrediction(match, programConfig)) return true;
+  return false;
+}
+
+function formatFirstPredictionGraceDeadline(match, programConfig) {
+  const end = getFirstPredictionGraceEndDate(match, programConfig);
+  if (!end || Number.isNaN(end.getTime())) return '';
+  const y = end.getFullYear();
+  const mo = String(end.getMonth() + 1).padStart(2, '0');
+  const day = String(end.getDate()).padStart(2, '0');
+  return `${y}-${mo}-${day} ${formatTimeHH24(end.toISOString())}`;
+}
+
 function getTeamCode(teamName, teams) {
   const t = teams.find(x => (x.name || '').toLowerCase() === (teamName || '').toLowerCase());
   return (t?.code || '').trim() || teamName || '';
@@ -471,8 +493,21 @@ export default function Dashboard() {
   const [showParticipatedModal, setShowParticipatedModal] = useState(false);
   const [showTodayMatchesModal, setShowTodayMatchesModal] = useState(false);
   const [showChallengePointsModal, setShowChallengePointsModal] = useState(false);
-  const [cricketInsightsConfig, setCricketInsightsConfig] = useState({ enabled: true, maxQuestionsPerUserPerMatch: 1, maxQuestionsPerMatch: 5 });
-  const [programConfig, setProgramConfig] = useState({ matchStartDate: '', crowdPredictionVisibility: 'always' });
+  const [cricketInsightsConfig, setCricketInsightsConfig] = useState({
+    enabled: true,
+    maxQuestionsPerUserPerMatch: 1,
+    maxQuestionsPerMatch: 5,
+    requiredApprovals: 1,
+    insightWrongAnswerPenalty: 0.25,
+    allowInsightQuestionsAfterPredictionCutoff: false,
+    allowInsightAnswersAfterPredictionCutoff: false,
+  });
+  const [programConfig, setProgramConfig] = useState({
+    matchStartDate: '',
+    crowdPredictionVisibility: 'always',
+    crowdPredictionMinutesAfterCutoff: 10,
+    extraFirstPredictionMinutesAfterCutoff: 0,
+  });
   const [insightQuestionCount, setInsightQuestionCount] = useState({});
   const [insightPointsByMatch, setInsightPointsByMatch] = useState({});
   /** matchId -> { userId, predictedWinner }[] for crowd % (all users) */
@@ -485,6 +520,14 @@ export default function Dashboard() {
   /** Active prediction contexts where the user saved picks (Firestore responses); not tied to admin scoring. */
   const [challengeParticipatedCount, setChallengeParticipatedCount] = useState(null);
   const today = getAppTodayDate();
+  /** Re-render periodically on the matches tab so crowd % appears when cutoff + delay elapses. */
+  const [, bumpCrowdRevealTick] = useReducer((x) => x + 1, 0);
+
+  useEffect(() => {
+    if (activeSection !== 'matches') return;
+    const id = setInterval(() => bumpCrowdRevealTick(), 30000);
+    return () => clearInterval(id);
+  }, [activeSection]);
 
   useEffect(() => {
     const section = location.state?.section;
@@ -723,6 +766,13 @@ export default function Dashboard() {
             maxQuestionsPerUserPerMatch: d.maxQuestionsPerUserPerMatch ?? 1,
             maxQuestionsPerMatch: d.maxQuestionsPerMatch ?? 5,
             insightApproverIds: Array.isArray(d.insightApproverIds) ? d.insightApproverIds : [],
+            requiredApprovals: d.requiredApprovals ?? 1,
+            insightWrongAnswerPenalty:
+              d.insightWrongAnswerPenalty != null && d.insightWrongAnswerPenalty !== ''
+                ? Number(d.insightWrongAnswerPenalty)
+                : 0.25,
+            allowInsightQuestionsAfterPredictionCutoff: d.allowInsightQuestionsAfterPredictionCutoff === true,
+            allowInsightAnswersAfterPredictionCutoff: d.allowInsightAnswersAfterPredictionCutoff === true,
           });
         }
       } catch {
@@ -735,6 +785,14 @@ export default function Dashboard() {
           setProgramConfig({
             matchStartDate: d.matchStartDate || '',
             crowdPredictionVisibility: d.crowdPredictionVisibility === 'afterCutoff' ? 'afterCutoff' : 'always',
+            crowdPredictionMinutesAfterCutoff:
+              d.crowdPredictionMinutesAfterCutoff != null && d.crowdPredictionMinutesAfterCutoff !== ''
+                ? Number(d.crowdPredictionMinutesAfterCutoff)
+                : 10,
+            extraFirstPredictionMinutesAfterCutoff:
+              d.extraFirstPredictionMinutesAfterCutoff != null && d.extraFirstPredictionMinutesAfterCutoff !== ''
+                ? Number(d.extraFirstPredictionMinutesAfterCutoff)
+                : 0,
           });
         }
       } catch {
@@ -1002,14 +1060,21 @@ export default function Dashboard() {
       alert('You are awaiting admin approval to predict matches. Please contact the admin.');
       return;
     }
-    if (match && !isPredictionEligible(match)) {
-      alert('Prediction closed. You had to predict before the cutoff time.');
-      return;
-    }
     setSaving(matchId);
     try {
       const predRef = doc(db, 'predictions', `${user.uid}_${matchId}`);
       const existing = await getDoc(predRef);
+      if (match) {
+        if (existing.exists()) {
+          if (!isPredictionEligible(match)) {
+            alert('Prediction time over. Cannot modify record.');
+            return;
+          }
+        } else if (!canSubmitFirstPrediction(match, programConfig)) {
+          alert('Prediction closed. You had to predict before the cutoff time.');
+          return;
+        }
+      }
       const now = new Date().toISOString();
       await setDoc(predRef, {
         userId: user.uid,
@@ -1032,9 +1097,17 @@ export default function Dashboard() {
         return { ...prev, [key]: list };
       });
     } catch (err) {
-      alert(err.message);
+      const code = err?.code || '';
+      if (code === 'permission-denied') {
+        alert(
+          'Prediction not allowed after the cutoff time. You cannot create or change a saved prediction.'
+        );
+      } else {
+        alert(err.message || 'Save failed');
+      }
+    } finally {
+      setSaving(null);
     }
-    setSaving(null);
   };
 
   const renderCrowdMatchStats = (match) => {
@@ -1883,9 +1956,9 @@ export default function Dashboard() {
                         {!canUserPredict(userProfile, programConfig) ? (
                       <>
                         <p className="prediction-closed">Awaiting admin approval. You registered after the match start date. Contact admin to get approval for predictions.</p>
-                        {shouldShowCrowdPrediction(programConfig, match, isPredictionEligible(match)) && renderCrowdMatchStats(match)}
+                        {shouldShowCrowdPrediction(programConfig, match) && renderCrowdMatchStats(match)}
                       </>
-                    ) : !isPredictionEligible(match) ? (
+                    ) : !canShowMatchPredictionControls(match, programConfig, userProfile, savedMatchIds) ? (
                       <>
                         {(match.status || '').toLowerCase() !== 'completed' && (
                           <p className="prediction-closed">Prediction closed. Cutoff was {formatMatchTime(match.thresholdTime || match.time)} on {match.date}.</p>
@@ -1901,14 +1974,33 @@ export default function Dashboard() {
                           {match.pointResults && match.pointResults[user?.uid] != null && (
                             <p className="match-points-badge">Your points: <strong className={match.pointResults[user.uid] >= 0 ? 'points-positive' : 'points-negative'}>{match.pointResults[user.uid]}</strong></p>
                           )}
-                          {cricketInsightsConfig.enabled && (insightPointsByMatch[match.id] || 0) > 0 && (
-                            <p className="match-points-badge match-insight-points">Insight points: <strong className="points-positive">+{insightPointsByMatch[match.id]}</strong></p>
+                          {cricketInsightsConfig.enabled &&
+                            Number(insightPointsByMatch[match.id] ?? 0) !== 0 && (
+                            <p className="match-points-badge match-insight-points">
+                              Insight points:{' '}
+                              <strong
+                                className={
+                                  Number(insightPointsByMatch[match.id]) >= 0 ? 'points-positive' : 'points-negative'
+                                }
+                              >
+                                {Number(insightPointsByMatch[match.id]) >= 0 ? '+' : ''}
+                                {insightPointsByMatch[match.id]}
+                              </strong>
+                            </p>
                           )}
                         </div>
-                        {shouldShowCrowdPrediction(programConfig, match, isPredictionEligible(match)) && renderCrowdMatchStats(match)}
+                        {shouldShowCrowdPrediction(programConfig, match) && renderCrowdMatchStats(match)}
                       </>
                     ) : (
                       <>
+                    {!isPredictionEligible(match) &&
+                      !savedMatchIds.has(String(match.id)) &&
+                      match.firstPredictionGraceEndsAt &&
+                      formatFirstPredictionGraceDeadline(match, programConfig) && (
+                      <p className="muted prediction-grace-note">
+                        Late first prediction — submit before {formatFirstPredictionGraceDeadline(match, programConfig)}.
+                      </p>
+                    )}
                     <label>Predict Winner:</label>
                     <div className="prediction-row">
                       <select
@@ -1931,7 +2023,7 @@ export default function Dashboard() {
                         {saving === match.id ? 'Saving...' : 'Save'}
                       </button>
                     </div>
-                    {shouldShowCrowdPrediction(programConfig, match, isPredictionEligible(match)) && renderCrowdMatchStats(match)}
+                    {shouldShowCrowdPrediction(programConfig, match) && renderCrowdMatchStats(match)}
                     </>
                     )}
                   </div>
@@ -1941,7 +2033,7 @@ export default function Dashboard() {
                   })()}
                   {cricketInsightsConfig.enabled && expandedInsightMatchId === match.id && (
                     <div className="match-insights">
-                      <CricketInsights matchId={match.id} matchDate={match.date} matchStatus={match.status} config={cricketInsightsConfig} />
+                      <CricketInsights matchId={match.id} matchDate={match.date} matchStatus={match.status} match={match} config={cricketInsightsConfig} />
                     </div>
                   )}
                 </div>
@@ -2086,14 +2178,25 @@ export default function Dashboard() {
                             Your points: <strong className={match.pointResults[user.uid] >= 0 ? 'points-positive' : 'points-negative'}>{match.pointResults[user.uid]}</strong>
                           </p>
                         )}
-                        {cricketInsightsConfig.enabled && (insightPointsByMatch[match.id] || 0) > 0 && (
-                          <p className="match-points-badge match-insight-points">Insight points: <strong className="points-positive">+{insightPointsByMatch[match.id]}</strong></p>
+                        {cricketInsightsConfig.enabled &&
+                          Number(insightPointsByMatch[match.id] ?? 0) !== 0 && (
+                          <p className="match-points-badge match-insight-points">
+                            Insight points:{' '}
+                            <strong
+                              className={
+                                Number(insightPointsByMatch[match.id]) >= 0 ? 'points-positive' : 'points-negative'
+                              }
+                            >
+                              {Number(insightPointsByMatch[match.id]) >= 0 ? '+' : ''}
+                              {insightPointsByMatch[match.id]}
+                            </strong>
+                          </p>
                         )}
                       </div>
-                      {shouldShowCrowdPrediction(programConfig, match, isPredictionEligible(match)) && renderCrowdMatchStats(match)}
+                      {shouldShowCrowdPrediction(programConfig, match) && renderCrowdMatchStats(match)}
                       {cricketInsightsConfig.enabled && expandedInsightMatchId === match.id && (
                         <div className="match-insights">
-                          <CricketInsights matchId={match.id} matchDate={match.date} matchStatus={match.status} config={cricketInsightsConfig} />
+                          <CricketInsights matchId={match.id} matchDate={match.date} matchStatus={match.status} match={match} config={cricketInsightsConfig} />
                         </div>
                       )}
                     </div>
@@ -2848,7 +2951,7 @@ export default function Dashboard() {
               <ul className="today-matches-modal-list">
                 {[...todayMatches].sort((a, b) => (a.time || '00:00').localeCompare(b.time || '00:00')).map((m) => {
                   const predicted = predictions[String(m.id)] ?? predictions[m.id] ?? '';
-                  const eligible = isPredictionEligible(m);
+                  const showPredControls = canShowMatchPredictionControls(m, programConfig, userProfile, savedMatchIds);
                   return (
                     <li key={m.id} className="today-match-modal-item">
                       <div className="today-match-modal-header">
@@ -2865,8 +2968,16 @@ export default function Dashboard() {
                       </div>
                       {!canUserPredict(userProfile, programConfig) ? (
                         <p className="prediction-closed">Awaiting admin approval to predict. Contact admin.</p>
-                      ) : eligible ? (
+                      ) : showPredControls ? (
                         <div className="today-match-modal-prediction">
+                          {!isPredictionEligible(m) &&
+                            !savedMatchIds.has(String(m.id)) &&
+                            m.firstPredictionGraceEndsAt &&
+                            formatFirstPredictionGraceDeadline(m, programConfig) && (
+                            <p className="muted prediction-grace-note">
+                              Late first prediction — submit before {formatFirstPredictionGraceDeadline(m, programConfig)}.
+                            </p>
+                          )}
                           <label>Predict winner:</label>
                           <div className="prediction-row">
                             <select

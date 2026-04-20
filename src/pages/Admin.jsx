@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useAutoDismiss } from '../hooks/useAutoDismiss';
-import { collection, addDoc, getDocs, getDoc, doc, setDoc, updateDoc, deleteDoc, deleteField, query, where, increment, runTransaction, writeBatch } from 'firebase/firestore';
+import { collection, addDoc, getDocs, getDoc, doc, setDoc, updateDoc, deleteDoc, deleteField, query, where, increment, runTransaction, writeBatch, Timestamp } from 'firebase/firestore';
 import { db, callFunction } from '../firebase/config';
 import Sidebar from '../components/Sidebar';
 import { toInitCap } from '../utils/format';
@@ -12,12 +12,29 @@ import {
   MATCH_WINNER_CANCELLED,
   getMatchResultLabel,
 } from '../utils/matchOutcomes';
-import { isPredictionEligible } from '../utils/match';
+import {
+  getMatchPredictionCutoffDate,
+  getExtraFirstPredictionMinutesAfterCutoff,
+  isPredictionEligible,
+} from '../utils/match';
 import { getAppTodayDate } from '../utils/calendarDate';
 import { getPredictionSavedIso, formatTimeHH24 } from '../utils/predictionTime';
 import { formatInsightUserLabel } from '../utils/insightQuestions';
+import { getInsightWrongAnswerPenalty, insightPointDeltaOnAnswerChange } from '../utils/insightScoring';
 import PredictionContextsAdminPanel from '../components/PredictionContextsAdminPanel';
 import * as XLSX from 'xlsx';
+
+/** Persists server-side cutoff + first-pick grace end for Firestore rules (predictions create vs update). */
+function withPredictionCutoffAt(matchFields, programConfig) {
+  const cutoff = getMatchPredictionCutoffDate(matchFields);
+  const extraMin = programConfig != null ? getExtraFirstPredictionMinutesAfterCutoff(programConfig) : 0;
+  const graceEnd = cutoff ? new Date(cutoff.getTime() + extraMin * 60 * 1000) : null;
+  return {
+    ...matchFields,
+    ...(cutoff ? { predictionCutoffAt: Timestamp.fromDate(cutoff) } : {}),
+    ...(graceEnd ? { firstPredictionGraceEndsAt: Timestamp.fromDate(graceEnd) } : {}),
+  };
+}
 
 function formatMatchTime(time) {
   if (!time) return 'TBD';
@@ -191,6 +208,8 @@ export default function Admin() {
     scheduleIntervalMinutes: 10,
     loserPercent: 25,
     crowdPredictionVisibility: 'always',
+    crowdPredictionMinutesAfterCutoff: 10,
+    extraFirstPredictionMinutesAfterCutoff: 0,
     notifyOnPointsCalculated: true,
   });
   const [cricketInsightsConfig, setCricketInsightsConfig] = useState({
@@ -199,6 +218,9 @@ export default function Admin() {
     maxQuestionsPerMatch: 5,
     insightApproverIds: [],
     requiredApprovals: 1,
+    insightWrongAnswerPenalty: 0.25,
+    allowInsightQuestionsAfterPredictionCutoff: false,
+    allowInsightAnswersAfterPredictionCutoff: false,
   });
   const [usernameLookupList, setUsernameLookupList] = useState([]);
   const [calculatingMatchId, setCalculatingMatchId] = useState(null);
@@ -352,6 +374,14 @@ export default function Admin() {
             scheduleIntervalMinutes: d.scheduleIntervalMinutes ?? 10,
             loserPercent: d.loserPercent ?? 25,
             crowdPredictionVisibility: d.crowdPredictionVisibility === 'afterCutoff' ? 'afterCutoff' : 'always',
+            crowdPredictionMinutesAfterCutoff:
+              d.crowdPredictionMinutesAfterCutoff != null && d.crowdPredictionMinutesAfterCutoff !== ''
+                ? Number(d.crowdPredictionMinutesAfterCutoff)
+                : 10,
+            extraFirstPredictionMinutesAfterCutoff:
+              d.extraFirstPredictionMinutesAfterCutoff != null && d.extraFirstPredictionMinutesAfterCutoff !== ''
+                ? Number(d.extraFirstPredictionMinutesAfterCutoff)
+                : 0,
             notifyOnPointsCalculated: d.notifyOnPointsCalculated !== false,
           });
         }
@@ -370,6 +400,12 @@ export default function Admin() {
             maxQuestionsPerMatch: Math.max(1, Math.min(20, d.maxQuestionsPerMatch ?? 5)),
             insightApproverIds: approverIds,
             requiredApprovals: Math.max(1, Math.min(10, d.requiredApprovals ?? 1)),
+            insightWrongAnswerPenalty:
+              d.insightWrongAnswerPenalty != null && d.insightWrongAnswerPenalty !== ''
+                ? Number(d.insightWrongAnswerPenalty)
+                : 0.25,
+            allowInsightQuestionsAfterPredictionCutoff: d.allowInsightQuestionsAfterPredictionCutoff === true,
+            allowInsightAnswersAfterPredictionCutoff: d.allowInsightAnswersAfterPredictionCutoff === true,
           }));
         }
       } catch {
@@ -601,21 +637,30 @@ export default function Admin() {
         query(collection(db, 'cricket_answers'), where('questionId', '==', q.id))
       );
       const correctAnswerNorm = String(correctAnswerInput).trim().toLowerCase();
+      const penalty = getInsightWrongAnswerPenalty({ cricketInsightsConfig, pointRules });
       const winners = answersSnap.docs
         .map(d => ({ ...d.data(), id: d.id }))
         .filter(a => String(a.answer || '').trim().toLowerCase() === correctAnswerNorm);
+      const losers = answersSnap.docs
+        .map(d => ({ ...d.data(), id: d.id }))
+        .filter(a => String(a.answer || '').trim().toLowerCase() !== correctAnswerNorm);
       const matchId = q.matchId;
       if (matchId) {
         const updates = {};
         winners.forEach(w => {
           if (w.userId) updates[`insightPointResults.${w.userId}`] = increment(1);
         });
+        if (penalty > 0) {
+          losers.forEach((w) => {
+            if (w.userId) updates[`insightPointResults.${w.userId}`] = increment(-penalty);
+          });
+        }
         if (Object.keys(updates).length > 0) {
           await updateDoc(doc(db, 'matches', matchId), updates);
         }
       }
       const trimmed = correctAnswerInput.trim();
-      let msg = `Correct answer set. ${winners.length} user(s) who answered correctly awarded +1 insight point.`;
+      let msg = `Correct answer set. ${winners.length} user(s) +1 pt${penalty > 0 ? `; ${losers.length} wrong answer(s) −${penalty} each` : ''}.`;
       if (!matchId) msg += ' Warning: no matchId — points were not saved on the match.';
       setMessage(msg);
       setAnswerModalQuestion(null);
@@ -652,7 +697,7 @@ export default function Admin() {
     }
     if (
       !window.confirm(
-        'Update the correct answer? Match insight points will change by +1 or −1 for each player whose answer now matches or no longer matches the official answer.'
+        'Update the correct answer? Match insight points will adjust (+1 / −penalty for wrong) for each player based on the new official answer.'
       )
     ) {
       return;
@@ -665,6 +710,7 @@ export default function Admin() {
       const oldNorm = oldAns.toLowerCase();
       const newNorm = newAns.toLowerCase();
       const matchId = q.matchId;
+      const penalty = getInsightWrongAnswerPenalty({ cricketInsightsConfig, pointRules });
       const updates = {};
       answersSnap.docs.forEach((d) => {
         const a = d.data();
@@ -673,7 +719,7 @@ export default function Admin() {
         const ansNorm = String(a.answer || '').trim().toLowerCase();
         const wasRight = ansNorm === oldNorm;
         const nowRight = ansNorm === newNorm;
-        const delta = (nowRight ? 1 : 0) - (wasRight ? 1 : 0);
+        const delta = insightPointDeltaOnAnswerChange(wasRight, nowRight, penalty);
         if (delta !== 0) updates[`insightPointResults.${uid}`] = increment(delta);
       });
       await updateDoc(doc(db, 'cricket_questions', q.id), {
@@ -867,11 +913,17 @@ export default function Admin() {
       let n = 0;
       for (const m of result.matches) {
         const ref = doc(collection(db, 'matches'));
-        batch.set(ref, {
-          ...m,
-          createdBy: user.uid,
-          createdAt,
-        });
+        batch.set(
+          ref,
+          withPredictionCutoffAt(
+            {
+              ...m,
+              createdBy: user.uid,
+              createdAt,
+            },
+            programConfig
+          )
+        );
         n += 1;
         if (n >= BATCH) {
           await batch.commit();
@@ -1008,20 +1060,26 @@ export default function Admin() {
     const city = (matchForm.city || '').trim();
     const crowd = matchForm.crowdPredictionVisibility;
     try {
-      await addDoc(collection(db, 'matches'), {
-        matchNumber,
-        team1: matchForm.team1,
-        team2: matchForm.team2,
-        date: matchForm.date,
-        time: matchForm.time || '19:00',
-        thresholdTime: matchForm.thresholdTime || '18:00',
-        status: 'open',
-        ...(stadium ? { stadium } : {}),
-        ...(city ? { city } : {}),
-        ...(crowd === 'always' || crowd === 'afterCutoff' ? { crowdPredictionVisibility: crowd } : {}),
-        createdBy: user.uid,
-        createdAt: new Date().toISOString(),
-      });
+      await addDoc(
+        collection(db, 'matches'),
+        withPredictionCutoffAt(
+          {
+            matchNumber,
+            team1: matchForm.team1,
+            team2: matchForm.team2,
+            date: matchForm.date,
+            time: matchForm.time || '19:00',
+            thresholdTime: matchForm.thresholdTime || '18:00',
+            status: 'open',
+            ...(stadium ? { stadium } : {}),
+            ...(city ? { city } : {}),
+            ...(crowd === 'always' || crowd === 'afterCutoff' ? { crowdPredictionVisibility: crowd } : {}),
+            createdBy: user.uid,
+            createdAt: new Date().toISOString(),
+          },
+          programConfig
+        )
+      );
       setMatchForm(prev => ({
         matchNumber: '',
         team1: '',
@@ -1101,20 +1159,26 @@ export default function Admin() {
         statusLc === 'completed' && isDrawOrCancelledWinner(editingMatch.winner)
           ? Object.fromEntries(participatingUsers.map((u) => [u.id, 0]))
           : undefined;
-      await updateDoc(doc(db, 'matches', editingMatch.id), {
-        matchNumber: (editingMatch.matchNumber || '').toString().trim(),
-        team1: editingMatch.team1,
-        team2: editingMatch.team2,
-        date: editingMatch.date,
-        time: editingMatch.time,
-        thresholdTime: editingMatch.thresholdTime,
-        status: editingMatch.status || 'open',
-        winner: editingMatch.winner || null,
-        stadium: est || null,
-        city: ecity || null,
-        ...(pointResultsForNoScore ? { pointResults: pointResultsForNoScore } : {}),
-        ...crowdPatch,
-      });
+      await updateDoc(
+        doc(db, 'matches', editingMatch.id),
+        withPredictionCutoffAt(
+          {
+            matchNumber: (editingMatch.matchNumber || '').toString().trim(),
+            team1: editingMatch.team1,
+            team2: editingMatch.team2,
+            date: editingMatch.date,
+            time: editingMatch.time,
+            thresholdTime: editingMatch.thresholdTime,
+            status: editingMatch.status || 'open',
+            winner: editingMatch.winner || null,
+            stadium: est || null,
+            city: ecity || null,
+            ...(pointResultsForNoScore ? { pointResults: pointResultsForNoScore } : {}),
+            ...crowdPatch,
+          },
+          programConfig
+        )
+      );
       setEditingMatch(null);
       setMessage('Match updated successfully');
       fetchData();
@@ -1412,11 +1476,25 @@ export default function Admin() {
       const deadline = (passwordPolicy.surrenderDeadline || '').trim();
       const maxPerUser = Math.max(1, Math.min(10, parseInt(cricketInsightsConfig.maxQuestionsPerUserPerMatch, 10) || 1));
       const maxPerMatch = Math.max(1, Math.min(20, parseInt(cricketInsightsConfig.maxQuestionsPerMatch, 10) || 5));
+      const insightPenalty = Math.max(
+        0,
+        to2Decimals(Math.abs(Number(cricketInsightsConfig.insightWrongAnswerPenalty ?? 0.25)))
+      );
       const matchStartDate = (programConfig.matchStartDate || '').trim();
       const scheduleInterval = Math.max(1, Math.min(60, parseInt(programConfig.scheduleIntervalMinutes, 10) || 10));
       const loserPercent = Math.max(0, Math.min(50, parseInt(programConfig.loserPercent, 10) || 25));
       const crowdPredictionVisibility =
         programConfig.crowdPredictionVisibility === 'afterCutoff' ? 'afterCutoff' : 'always';
+      const rawCrowdDelay = programConfig.crowdPredictionMinutesAfterCutoff;
+      const crowdPredictionMinutesAfterCutoff =
+        rawCrowdDelay != null && rawCrowdDelay !== '' && Number.isFinite(Number(rawCrowdDelay))
+          ? Math.max(0, Math.min(24 * 60, Number(rawCrowdDelay)))
+          : 10;
+      const rawExtraFirst = programConfig.extraFirstPredictionMinutesAfterCutoff;
+      const extraFirstPredictionMinutesAfterCutoff =
+        rawExtraFirst != null && rawExtraFirst !== '' && Number.isFinite(Number(rawExtraFirst))
+          ? Math.max(0, Math.min(24 * 60, Number(rawExtraFirst)))
+          : 0;
       const notifyOnPointsCalculated = programConfig.notifyOnPointsCalculated !== false;
       await Promise.all([
         setDoc(doc(db, 'rules', 'pointRules'), {
@@ -1429,6 +1507,8 @@ export default function Admin() {
           scheduleIntervalMinutes: scheduleInterval,
           loserPercent: loserPercent,
           crowdPredictionVisibility,
+          crowdPredictionMinutesAfterCutoff,
+          extraFirstPredictionMinutesAfterCutoff,
           notifyOnPointsCalculated,
           updatedAt: new Date().toISOString(),
         }),
@@ -1443,6 +1523,11 @@ export default function Admin() {
           maxQuestionsPerMatch: maxPerMatch,
           insightApproverIds: cricketInsightsConfig.insightApproverIds || [],
           requiredApprovals: Math.max(1, Math.min(10, parseInt(cricketInsightsConfig.requiredApprovals, 10) || 1)),
+          insightWrongAnswerPenalty: insightPenalty,
+          allowInsightQuestionsAfterPredictionCutoff:
+            cricketInsightsConfig.allowInsightQuestionsAfterPredictionCutoff === true,
+          allowInsightAnswersAfterPredictionCutoff:
+            cricketInsightsConfig.allowInsightAnswersAfterPredictionCutoff === true,
           updatedAt: new Date().toISOString(),
         }),
       ]);
@@ -1468,10 +1553,22 @@ export default function Admin() {
         scheduleIntervalMinutes: scheduleInterval,
         loserPercent,
         crowdPredictionVisibility,
+        crowdPredictionMinutesAfterCutoff,
+        extraFirstPredictionMinutesAfterCutoff,
         notifyOnPointsCalculated,
       }));
       setPasswordPolicy(prev => ({ ...prev, maxPasswordChanges: max, surrenderDeadline: deadline }));
-      setCricketInsightsConfig(prev => ({ ...prev, enabled: cricketInsightsConfig.enabled, maxQuestionsPerUserPerMatch: maxPerUser, maxQuestionsPerMatch: maxPerMatch }));
+      setCricketInsightsConfig((prev) => ({
+        ...prev,
+        enabled: cricketInsightsConfig.enabled,
+        maxQuestionsPerUserPerMatch: maxPerUser,
+        maxQuestionsPerMatch: maxPerMatch,
+        insightWrongAnswerPenalty: insightPenalty,
+        allowInsightQuestionsAfterPredictionCutoff:
+          cricketInsightsConfig.allowInsightQuestionsAfterPredictionCutoff === true,
+        allowInsightAnswersAfterPredictionCutoff:
+          cricketInsightsConfig.allowInsightAnswersAfterPredictionCutoff === true,
+      }));
       setMessage('Program config saved successfully');
     } catch (err) {
       setMessage('Error: ' + (err.message || 'Save failed'));
@@ -1934,10 +2031,50 @@ export default function Admin() {
                       onChange={(e) => setProgramConfig(prev => ({ ...prev, crowdPredictionVisibility: e.target.value }))}
                     >
                       <option value="always">Show before and after prediction cutoff</option>
-                      <option value="afterCutoff">Show only after prediction cutoff</option>
+                      <option value="afterCutoff">Show only after cutoff + delay (below)</option>
                     </select>
                   </div>
-                  <p className="muted config-note">Controls when team crowd percentages appear on the dashboard. Per-match overrides can be set when adding or editing a match.</p>
+                  <div className="config-item">
+                    <label htmlFor="crowd-pred-minutes-after">Minutes after prediction cutoff (crowd % delay):</label>
+                    <input
+                      id="crowd-pred-minutes-after"
+                      type="number"
+                      min="0"
+                      max="1440"
+                      value={programConfig.crowdPredictionMinutesAfterCutoff ?? 10}
+                      onChange={(e) =>
+                        setProgramConfig((prev) => ({ ...prev, crowdPredictionMinutesAfterCutoff: e.target.value }))
+                      }
+                    />
+                  </div>
+                  <p className="muted config-note">
+                    When “after cutoff + delay” is selected (globally or per match), crowd percentages appear only after
+                    the match’s prediction cutoff time plus this many minutes (default 10). Per-match overrides can still
+                    choose always vs delayed visibility when adding or editing a match.
+                  </p>
+                  <div className="config-item">
+                    <label htmlFor="extra-first-pred-minutes">
+                      Extra minutes after cutoff (first prediction only):
+                    </label>
+                    <input
+                      id="extra-first-pred-minutes"
+                      type="number"
+                      min="0"
+                      max="1440"
+                      value={programConfig.extraFirstPredictionMinutesAfterCutoff ?? 0}
+                      onChange={(e) =>
+                        setProgramConfig((prev) => ({
+                          ...prev,
+                          extraFirstPredictionMinutesAfterCutoff: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                  <p className="muted config-note">
+                    Users who have not yet saved a pick for a match may submit one until this many minutes after the
+                    normal prediction cutoff. Changing an existing pick is never allowed after the cutoff. Re-save or edit
+                    matches in Admin so stored grace times match this setting.
+                  </p>
                 </div>
                 <div className="config-card">
                   <h3>Point Rules</h3>
@@ -2033,6 +2170,54 @@ export default function Admin() {
                       title="1 = single approver; 2+ = need at least 50% of this number of approvals"
                     />
                     <p className="muted config-note">e.g. 2 = need 1 approval, 4 = need 2 approvals</p>
+                  </div>
+                  <div className="config-item">
+                    <label>Wrong insight answer penalty (points deducted per wrong answer when admin sets correct answer):</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.05"
+                      value={cricketInsightsConfig.insightWrongAnswerPenalty ?? 0.25}
+                      onChange={(e) =>
+                        setCricketInsightsConfig((prev) => ({
+                          ...prev,
+                          insightWrongAnswerPenalty: e.target.value === '' ? '' : Number(e.target.value),
+                        }))
+                      }
+                    />
+                    <p className="muted config-note">
+                      Default 0.25. If unset in older data, falls back to Point rules &quot;Wrong prediction&quot; value.
+                    </p>
+                  </div>
+                  <div className="config-item">
+                    <label className="form-check">
+                      <input
+                        type="checkbox"
+                        checked={cricketInsightsConfig.allowInsightQuestionsAfterPredictionCutoff === true}
+                        onChange={(e) =>
+                          setCricketInsightsConfig((prev) => ({
+                            ...prev,
+                            allowInsightQuestionsAfterPredictionCutoff: e.target.checked,
+                          }))
+                        }
+                      />
+                      Allow new insight questions after match prediction cutoff
+                    </label>
+                  </div>
+                  <div className="config-item">
+                    <label className="form-check">
+                      <input
+                        type="checkbox"
+                        checked={cricketInsightsConfig.allowInsightAnswersAfterPredictionCutoff === true}
+                        onChange={(e) =>
+                          setCricketInsightsConfig((prev) => ({
+                            ...prev,
+                            allowInsightAnswersAfterPredictionCutoff: e.target.checked,
+                          }))
+                        }
+                      />
+                      Allow insight answer submissions after match prediction cutoff
+                    </label>
                   </div>
                   <div className="config-item">
                     <label>Insight Approvers:</label>
