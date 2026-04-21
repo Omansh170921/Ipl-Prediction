@@ -3487,7 +3487,7 @@ button.stat-card.stat-card-clickable.stat-card--win-loss:hover {
 }
 
 .modal-content.modal-content--insight {
-  max-width: min(100%, 28rem);
+  max-width: min(100%, 32rem);
   padding: 0;
   overflow: hidden;
 }
@@ -3497,7 +3497,7 @@ button.stat-card.stat-card-clickable.stat-card--win-loss:hover {
 }
 
 .modal-content.modal-content--points-history {
-  max-width: min(100%, 28rem);
+  max-width: min(100%, 32rem);
   max-height: min(92vh, 40rem);
   padding: 0;
   display: flex;
@@ -3563,6 +3563,45 @@ button.stat-card.stat-card-clickable.stat-card--win-loss:hover {
   font-size: 0.88rem;
   line-height: 1.45;
   color: var(--text-muted);
+}
+
+.cumulative-points-chart-wrap {
+  margin: 0.35rem 0 0;
+  padding: 0.65rem 0.65rem 0.5rem;
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.cumulative-points-chart-caption {
+  margin: 0 0 0.45rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary, inherit);
+}
+
+.cumulative-points-chart-svg {
+  width: 100%;
+  height: auto;
+  max-height: 220px;
+  display: block;
+}
+
+.cumulative-points-chart-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+  opacity: 0.5;
+}
+
+.cumulative-points-chart-axis {
+  font-size: 9px;
+  fill: var(--text-muted);
+}
+
+.cumulative-points-chart-xlabel {
+  font-size: 10px;
+  fill: var(--text-muted);
+  font-weight: 500;
 }
 
 .point-history-scroll.points-history-scroll {
@@ -4747,6 +4786,34 @@ button.stat-card.stat-card-clickable.stat-card--win-loss:hover {
   grid-template-columns: 52px 52px 1fr 80px 44px;
 }
 
+/* Match picks tab: rank + name + correct / wrong / not predicted / draw */
+.leaderboard-table.leaderboard-pick-grid .leaderboard-header,
+.leaderboard-table.leaderboard-pick-grid .leaderboard-row {
+  grid-template-columns:
+    52px
+    minmax(0, 1fr)
+    minmax(3.25rem, auto)
+    minmax(3.25rem, auto)
+    minmax(4rem, auto)
+    minmax(2.75rem, auto);
+}
+
+.leaderboard-pick-grid .leaderboard-header span:nth-child(n + 3),
+.leaderboard-pick-grid .leaderboard-row span:nth-child(n + 3) {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.leaderboard-pick-grid .leaderboard-name-cell {
+  min-width: 0;
+}
+
+.leaderboard-name-cell {
+  text-align: left;
+  color: inherit;
+  min-width: 0;
+}
+
 .leaderboard-wl-symbol {
   font-size: 1.2rem;
   text-align: center;
@@ -5233,12 +5300,33 @@ button.stat-card.stat-card-clickable.stat-card--win-loss:hover {
     min-width: 22rem;
   }
 
+  .leaderboard-table.leaderboard-pick-grid .leaderboard-header,
+  .leaderboard-table.leaderboard-pick-grid .leaderboard-row {
+    grid-template-columns:
+      minmax(2.5rem, 3rem)
+      minmax(4.5rem, 1fr)
+      minmax(2.5rem, 3rem)
+      minmax(2.5rem, 3rem)
+      minmax(3.25rem, 3.75rem)
+      minmax(2.25rem, 2.75rem);
+    min-width: 22rem;
+  }
+
   .leaderboard-row > span:nth-child(1),
   .leaderboard-row > span:nth-child(2) {
     text-align: center;
   }
 
-  .leaderboard-username-btn {
+  .leaderboard-pick-grid .leaderboard-row > span:nth-child(1) {
+    text-align: center;
+  }
+
+  .leaderboard-pick-grid .leaderboard-row > .leaderboard-name-cell {
+    text-align: left;
+  }
+
+  .leaderboard-username-btn,
+  .leaderboard-name-cell {
     text-align: left;
     word-break: break-word;
     max-width: 100%;

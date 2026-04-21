@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { to2Decimals } from '../utils/points';
+import CumulativePointsLineChart from './CumulativePointsLineChart';
 
 function normAns(s) {
   return String(s ?? '').trim().toLowerCase();
@@ -125,6 +126,11 @@ export default function InsightHistoryModalContent({
     return { totalMatches, totalInsight, totalAttempted, totalCorrect };
   }, [rows]);
 
+  const insightChartValues = useMemo(() => {
+    if (!rows?.length) return [];
+    return [...rows].reverse().map((r) => r.runningInsight);
+  }, [rows]);
+
   if (!completedMatches?.length) {
     return (
       <div className="insight-history-empty">
@@ -180,6 +186,14 @@ export default function InsightHistoryModalContent({
           </ul>
         </div>
       )}
+
+      {insightChartValues.length > 0 ? (
+        <CumulativePointsLineChart
+          caption="Cumulative insight points (chronological)"
+          values={insightChartValues}
+          variant="insight"
+        />
+      ) : null}
 
       <p className="insight-history-intro">
         Newest matches first. Each row shows how you did on that match&apos;s insight questions and your running insight total after it.
