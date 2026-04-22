@@ -2710,6 +2710,7 @@ export default function Dashboard() {
                 )}
                 teams={teams}
                 getTeamCode={getTeamCode}
+                insightPenaltyContext={{ cricketInsightsConfig, pointRules }}
                 leaderboardRefresh={leaderboardRefresh}
               />
             </div>
@@ -2802,6 +2803,7 @@ export default function Dashboard() {
                       completedMatches={completed}
                       teams={teams}
                       getTeamCode={getTeamCode}
+                      insightPenaltyContext={{ cricketInsightsConfig, pointRules }}
                       leaderboardRefresh={leaderboardRefresh}
                     />
                   </div>

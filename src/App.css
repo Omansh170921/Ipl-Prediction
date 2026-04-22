@@ -1824,6 +1824,17 @@ button.stat-card.stat-card-clickable.stat-card--win-loss:hover {
   justify-content: center;
 }
 
+/* Season predictions: view participants (icon-only; count line is below title). */
+.match-card-icons--season-participants .btn-season-participants {
+  border-width: 2px;
+  color: var(--cricket-green);
+}
+
+.match-card-icons--season-participants .btn-season-participants .season-participants-btn-icon {
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
 .match-card .match-info {
   padding-top: 0.25rem;
 }
@@ -4277,33 +4288,58 @@ button.stat-card.stat-card-clickable.stat-card--win-loss:hover {
   white-space: nowrap;
 }
 
-/* Season challenge participant table needs more width than default 400px .modal-content */
+/* Season challenge participants modal: title + count + close */
+.season-participants-modal-header {
+  align-items: flex-start;
+}
+
+.season-participants-modal-header-text {
+  min-width: 0;
+  padding-right: 0.5rem;
+}
+
+.season-participants-modal-header .modal-close {
+  flex-shrink: 0;
+}
+
+.season-participants-modal-header h3 {
+  line-height: 1.25;
+}
+
+/* Season challenge participants: before deadline — username + time; after deadline / closed — + team picks. */
 .modal-content.participants-modal--season-challenge {
-  max-width: min(100%, 42rem);
+  max-width: min(100%, 34rem);
+}
+
+.modal-content.participants-modal--season-challenge.participants-modal--season-picks-visible {
+  max-width: min(100%, 44rem);
 }
 
 .participants-modal--season-challenge .participants-list {
   max-height: min(70vh, 520px);
 }
 
-.participants-modal--season-challenge .participants-list-header.cols-4,
-.participants-modal--season-challenge .participant-item.cols-4 {
-  grid-template-columns:
-    minmax(9rem, 1fr)
-    minmax(14rem, 1.85fr)
-    minmax(3.25rem, max-content)
-    minmax(12rem, auto);
+.participants-modal--season-challenge .participants-list-header.cols-2,
+.participants-modal--season-challenge .participant-item.cols-2 {
+  grid-template-columns: minmax(10rem, 1fr) minmax(12rem, auto);
   gap: 0.6rem 0.85rem;
   align-items: center;
 }
 
-.participants-modal--season-challenge .participants-list-header .col-participated-at {
-  text-align: right;
+.participants-modal--season-challenge .participants-list-header.cols-3,
+.participants-modal--season-challenge .participant-item.cols-3 {
+  grid-template-columns: minmax(8rem, 1fr) minmax(9rem, 1.35fr) minmax(10.5rem, auto);
+  gap: 0.6rem 0.85rem;
+  align-items: center;
+}
+
+.participants-modal--season-challenge .participants-list-header .col-season-picks {
   font-size: 0.8rem;
 }
 
-.participants-modal--season-challenge .participants-list-header .col-points {
+.participants-modal--season-challenge .participants-list-header .col-predicted-at {
   text-align: right;
+  font-size: 0.8rem;
 }
 
 .participants-modal--season-challenge .participant-name {

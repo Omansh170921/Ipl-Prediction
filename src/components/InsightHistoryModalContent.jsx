@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { to2Decimals } from '../utils/points';
+import { getInsightWrongAnswerPenalty } from '../utils/insightScoring';
 import CumulativePointsLineChart from './CumulativePointsLineChart';
 
 function normAns(s) {
@@ -9,24 +10,25 @@ function normAns(s) {
 }
 
 /**
- * Per-match insight stats for one user: approved questions, attempts, correct/wrong (when correctAnswer is set),
- * points from match.insightPointResults[uid], cumulative insight.
+ * Per-match insight stats: approved questions, attempts, correct/wrong (official correctAnswer only).
+ * Points per match = correct × (+1) + wrong × (−wrong-answer penalty), matching admin scoring so rows stay consistent.
  */
 export default function InsightHistoryModalContent({
   userId,
   completedMatches,
   teams,
   getTeamCode,
+  /** Same context as admin scoring (`getInsightWrongAnswerPenalty`). */
+  insightPenaltyContext,
   /** Increment when leaderboard data is refreshed so insight stats reload. */
   leaderboardRefresh = 0,
 }) {
+  const wrongAnswerPenalty = getInsightWrongAnswerPenalty(insightPenaltyContext || {});
   const [rows, setRows] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const refreshKey = (completedMatches || [])
-    .map((m) => `${String(m.id)}:${Number(m.insightPointResults?.[userId] ?? 0)}`)
-    .join('|');
+  const refreshKey = (completedMatches || []).map((m) => String(m.id)).join('|');
 
   useEffect(() => {
     const matches = completedMatches;
@@ -86,7 +88,7 @@ export default function InsightHistoryModalContent({
             else wrong++;
           }
 
-          const pointsEarned = to2Decimals(Number(m.insightPointResults?.[userId] ?? 0));
+          const pointsEarned = to2Decimals(correct - wrong * wrongAnswerPenalty);
           runningInsight = to2Decimals(runningInsight + pointsEarned);
           rowsChrono.push({
             m,
@@ -110,7 +112,7 @@ export default function InsightHistoryModalContent({
     return () => {
       cancelled = true;
     };
-  }, [userId, refreshKey, leaderboardRefresh]);
+  }, [userId, refreshKey, leaderboardRefresh, wrongAnswerPenalty]);
 
   const summary = useMemo(() => {
     if (!rows?.length) return null;
@@ -196,7 +198,8 @@ export default function InsightHistoryModalContent({
       ) : null}
 
       <p className="insight-history-intro">
-        Newest matches first. Each row shows how you did on that match&apos;s insight questions and your running insight total after it.
+        Newest matches first. Each row shows your answers vs the official correct answers. Points this match = (correct × +1) − (wrong ×{' '}
+        {to2Decimals(wrongAnswerPenalty)}), the same rule as when admins score questions. Running total is the sum of those match scores.
       </p>
 
       <div className="points-history-scroll insight-history-scroll">
@@ -229,7 +232,7 @@ export default function InsightHistoryModalContent({
                 </div>
                 <div>
                   <dt>Points this match</dt>
-                  <dd className="points-positive">{pointsEarned}</dd>
+                  <dd className={pointsEarned >= 0 ? 'points-positive' : 'points-negative'}>{pointsEarned}</dd>
                 </div>
                 <div className="insight-history-dl-cumulative">
                   <dt>Running total</dt>
