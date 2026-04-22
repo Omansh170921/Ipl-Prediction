@@ -27,6 +27,11 @@ import {
   getMatchResultLabel,
   isDrawOrCancelledWinner,
 } from '../utils/matchOutcomes';
+import {
+  getInsightWrongAnswerPenalty,
+  buildInsightRecalcFromSnapshots,
+  computeRecalculatedInsightTotalsByUser,
+} from '../utils/insightScoring';
 
 function formatMatchTime(time) {
   if (!time) return 'TBD';
@@ -210,23 +215,48 @@ function computeRankedMainLeaderboard(
   });
 }
 
-function computeInsightRanked(users, allMatches, dateCutoff) {
-  let insightMatches = allMatches;
+/**
+ * Insight leaderboard: same net points as the per-user insight history modal (Q&A + penalty),
+ * only counting completed matches through dateCutoff. Falls back to summing match.insightPointResults if recalc data missing.
+ */
+function computeInsightRanked(users, allMatches, dateCutoff, insightRecalc) {
+  let insightMatches = allMatches.filter(isMatchCompletedWithResult);
   if (dateCutoff) {
     insightMatches = insightMatches.filter((m) => (m.date || '') <= dateCutoff);
   }
-  const insightTotals = {};
+  insightMatches = sortMatchesChronological(insightMatches);
+
+  /** @type {Record<string, number>} */
+  let insightTotals = {};
   users.forEach((u) => {
     insightTotals[u.id] = 0;
   });
-  insightMatches.forEach((m) => {
-    const ir = m.insightPointResults;
-    if (ir && typeof ir === 'object') {
-      Object.entries(ir).forEach(([uid, pts]) => {
-        insightTotals[uid] = (insightTotals[uid] || 0) + Number(pts || 0);
-      });
-    }
-  });
+
+  const canRecalc =
+    insightRecalc?.questionsByMatchId &&
+    insightRecalc?.answersByUserId != null &&
+    insightRecalc.penalty != null &&
+    !Number.isNaN(Number(insightRecalc.penalty));
+
+  if (canRecalc) {
+    insightTotals = computeRecalculatedInsightTotalsByUser(
+      users,
+      insightMatches,
+      insightRecalc.questionsByMatchId,
+      insightRecalc.answersByUserId,
+      insightRecalc.penalty
+    );
+  } else {
+    insightMatches.forEach((m) => {
+      const ir = m.insightPointResults;
+      if (ir && typeof ir === 'object') {
+        Object.entries(ir).forEach(([uid, pts]) => {
+          insightTotals[uid] = to2Decimals((insightTotals[uid] || 0) + Number(pts || 0));
+        });
+      }
+    });
+  }
+
   const sortedByInsight = [...users]
     .map((u) => ({ ...u, insightPoints: insightTotals[u.id] ?? 0 }))
     .sort((a, b) => {
@@ -242,19 +272,41 @@ function computeInsightRanked(users, allMatches, dateCutoff) {
   });
 }
 
-function computeInsightRankedFromMatches(users, matchesSubset) {
-  const insightTotals = {};
+function computeInsightRankedFromMatches(users, matchesSubset, insightRecalc) {
+  let insightMatches = Array.isArray(matchesSubset) ? matchesSubset.filter(isMatchCompletedWithResult) : [];
+  insightMatches = sortMatchesChronological(insightMatches);
+
+  /** @type {Record<string, number>} */
+  let insightTotals = {};
   users.forEach((u) => {
     insightTotals[u.id] = 0;
   });
-  (matchesSubset || []).forEach((m) => {
-    const ir = m.insightPointResults;
-    if (ir && typeof ir === 'object') {
-      Object.entries(ir).forEach(([uid, pts]) => {
-        insightTotals[uid] = (insightTotals[uid] || 0) + Number(pts || 0);
-      });
-    }
-  });
+
+  const canRecalc =
+    insightRecalc?.questionsByMatchId &&
+    insightRecalc?.answersByUserId != null &&
+    insightRecalc.penalty != null &&
+    !Number.isNaN(Number(insightRecalc.penalty));
+
+  if (canRecalc) {
+    insightTotals = computeRecalculatedInsightTotalsByUser(
+      users,
+      insightMatches,
+      insightRecalc.questionsByMatchId,
+      insightRecalc.answersByUserId,
+      insightRecalc.penalty
+    );
+  } else {
+    insightMatches.forEach((m) => {
+      const ir = m.insightPointResults;
+      if (ir && typeof ir === 'object') {
+        Object.entries(ir).forEach(([uid, pts]) => {
+          insightTotals[uid] = to2Decimals((insightTotals[uid] || 0) + Number(pts || 0));
+        });
+      }
+    });
+  }
+
   const sortedByInsight = [...users]
     .map((u) => ({ ...u, insightPoints: insightTotals[u.id] ?? 0 }))
     .sort((a, b) => {
@@ -895,12 +947,17 @@ export default function Dashboard() {
       if (activeSection !== 'leaderboard' && activeSection !== 'dashboard') return;
       setLeaderboardLoading(true);
       try {
-        const [usersSnap, matchesSnap, predsSnap, ptSnap, progSnap] = await Promise.all([
+        const [usersSnap, matchesSnap, predsSnap, ptSnap, progSnap, qSnap, aSnap, ciSnap] = await Promise.all([
           getDocs(collection(db, 'users')).catch(() => ({ docs: [] })),
           getDocs(collection(db, 'matches')),
           getDocs(collection(db, 'predictions')),
           getDoc(doc(db, 'rules', 'pointRules')),
           getDoc(doc(db, 'settings', 'programConfig')).catch(() => null),
+          getDocs(query(collection(db, 'cricket_questions'), where('approved', '==', true))).catch(() => ({
+            docs: [],
+          })),
+          getDocs(collection(db, 'cricket_answers')).catch(() => ({ docs: [] })),
+          getDoc(doc(db, 'settings', 'cricketInsights')).catch(() => null),
         ]);
         const allUsers = (usersSnap?.docs || []).map(d => ({ id: d.id, ...d.data() }));
         const users = allUsers.filter(u => !u.isAdmin && u.isAdmin !== 'true');
@@ -917,8 +974,26 @@ export default function Dashboard() {
           matchStartDate: prog.matchStartDate || '',
           loserPercent: Math.max(0, Math.min(50, parseInt(prog.loserPercent, 10) || 25)),
         };
+        let insightRecalc = null;
+        try {
+          const { questionsByMatchId, answersByUserId } = buildInsightRecalcFromSnapshots(
+            qSnap.docs,
+            aSnap.docs
+          );
+          const ciData = ciSnap?.exists() ? ciSnap.data() : {};
+          const cricketInsightsConfig = {
+            insightWrongAnswerPenalty:
+              ciData.insightWrongAnswerPenalty != null && ciData.insightWrongAnswerPenalty !== ''
+                ? Number(ciData.insightWrongAnswerPenalty)
+                : undefined,
+          };
+          const penalty = getInsightWrongAnswerPenalty({ cricketInsightsConfig, pointRules: rules });
+          insightRecalc = { questionsByMatchId, answersByUserId, penalty };
+        } catch (e) {
+          console.error('Insight leaderboard recalc:', e);
+        }
         setPointRules(rules);
-        setLeaderboardRawData({ users, allMatches, predsByMatch, rules, programConfig });
+        setLeaderboardRawData({ users, allMatches, predsByMatch, rules, programConfig, insightRecalc });
       } catch (err) {
         console.error('Leaderboard fetch error:', err);
       }
@@ -957,7 +1032,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!leaderboardRawData) return;
-    const { users, allMatches, predsByMatch, rules, programConfig } = leaderboardRawData;
+    const { users, allMatches, predsByMatch, rules, programConfig, insightRecalc } = leaderboardRawData;
     const matchStartDate = (programConfig?.matchStartDate || '').trim();
     const prevCtx = getPreviousRankContext(allMatches, leaderboardDate || '');
 
@@ -1002,12 +1077,12 @@ export default function Dashboard() {
 
     let insightAtPrevious = [];
     if (prevCtx.excludeLastCompletedMatch) {
-      insightAtPrevious = computeInsightRankedFromMatches(users, prevCtx.completedSubset);
+      insightAtPrevious = computeInsightRankedFromMatches(users, prevCtx.completedSubset, insightRecalc);
     } else if (prevCtx.cutoffLabel) {
-      insightAtPrevious = computeInsightRanked(users, allMatches, prevCtx.cutoffLabel);
+      insightAtPrevious = computeInsightRanked(users, allMatches, prevCtx.cutoffLabel, insightRecalc);
     }
     const insightRankAtPreviousById = new Map(insightAtPrevious.map((u) => [u.id, u.rank]));
-    const insightRanked = computeInsightRanked(users, allMatches, leaderboardDate || '');
+    const insightRanked = computeInsightRanked(users, allMatches, leaderboardDate || '', insightRecalc);
     setInsightLeaderboard(
       insightRanked.map((u) => ({
         ...u,
