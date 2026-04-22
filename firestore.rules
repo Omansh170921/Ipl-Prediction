@@ -37,22 +37,34 @@ service cloud.firestore {
         );
     }
 
-    // Match prediction cutoff (Timestamp); set when admin saves match. If missing, legacy matches skip this check.
-    function matchPredictionWindowOpen(matchId) {
-      return !exists(/databases/$(database)/documents/matches/$(matchId)) ||
-        get(/databases/$(database)/documents/matches/$(matchId)).data.predictionCutoffAt == null ||
-        request.time < get(/databases/$(database)/documents/matches/$(matchId)).data.predictionCutoffAt;
+    // Match prediction: only compare to request.time when predictionCutoffAt is a real Timestamp; other types
+    // (legacy / bad data) are treated as "no cutoff" so the rule will not error-deny the whole check.
+    function matchPredictionWindowFromData(m) {
+      return !m.keys().hasAny(['predictionCutoffAt']) || m.predictionCutoffAt == null ||
+        !(m.predictionCutoffAt is timestamp) ||
+        (m.predictionCutoffAt is timestamp && request.time < m.predictionCutoffAt);
     }
 
-    // settings/cricketInsights: allowInsightQuestionsAfterPredictionCutoff / allowInsightAnswersAfterPredictionCutoff
+    function matchPredictionWindowOpen(matchId) {
+      return !exists(/databases/$(database)/documents/matches/$(matchId)) ||
+        matchPredictionWindowFromData(
+          get(/databases/$(database)/documents/matches/$(matchId)).data
+        );
+    }
+
+    // settings/cricketInsights: allowInsightQuestionsAfterPredictionCutoff (admin UI may be bool or legacy string)
     function cricketInsightsAllowQuestionsAfterCutoff() {
       return exists(/databases/$(database)/documents/settings/cricketInsights) &&
-        get(/databases/$(database)/documents/settings/cricketInsights).data.allowInsightQuestionsAfterPredictionCutoff == true;
+        firestoreTruthy(
+          get(/databases/$(database)/documents/settings/cricketInsights).data.allowInsightQuestionsAfterPredictionCutoff
+        );
     }
 
     function cricketInsightsAllowAnswersAfterCutoff() {
       return exists(/databases/$(database)/documents/settings/cricketInsights) &&
-        get(/databases/$(database)/documents/settings/cricketInsights).data.allowInsightAnswersAfterPredictionCutoff == true;
+        firestoreTruthy(
+          get(/databases/$(database)/documents/settings/cricketInsights).data.allowInsightAnswersAfterPredictionCutoff
+        );
     }
 
     function matchAllowsInsightQuestions(matchId) {
@@ -144,10 +156,12 @@ service cloud.firestore {
 
     // Cricket Insights: questions (users create; admin/approvers can approve; only admin can delete)
     // Only admins may change answersDisabled / answersDisabledAt / answersDisabledBy.
+    // Admins can always create (e.g. testing); others must be within the prediction/insight window (see matchAllowsInsightQuestions).
     match /cricket_questions/{docId} {
       allow read: if request.auth != null;
-      allow create: if request.auth != null &&
-        matchAllowsInsightQuestions(request.resource.data.matchId);
+      allow create: if request.auth != null && (
+        isAdmin() || matchAllowsInsightQuestions(request.resource.data.matchId)
+      );
       allow update: if isAdmin() ||
         (request.auth != null && exists(/databases/$(database)/documents/insight_approvers/$(request.auth.uid)) &&
           !request.resource.data.diff(resource.data).changedKeys().hasAny(['answersDisabled', 'answersDisabledAt', 'answersDisabledBy']));

@@ -9,6 +9,13 @@ const STROKE = {
   insight: '#6d28d9',
 };
 
+/** Semantic colors (CSS vars) for match-variant segments: up / down / flat cumulative. */
+const SEG = {
+  up: 'var(--success)',
+  down: 'var(--error)',
+  flat: 'var(--text-muted)',
+};
+
 /**
  * Line + area chart of cumulative points over ordered steps (matches).
  * @param {Object} props
@@ -41,12 +48,38 @@ export default function CumulativePointsLineChart({ caption, values, variant = '
     return { x, y: yn, raw: y };
   });
 
-  const lineD = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
   const baseY = PAD.t + ih;
+
+  const segmentStroke = (fromIdx, toIdx) => {
+    const d = nums[toIdx] - nums[fromIdx];
+    if (d > 0) return SEG.up;
+    if (d < 0) return SEG.down;
+    return SEG.flat;
+  };
+
+  const lineSegments =
+    variant === 'match' && n > 1
+      ? Array.from({ length: n - 1 }, (_, i) => ({
+          key: `seg-${i}`,
+          d: `M ${pts[i].x} ${pts[i].y} L ${pts[i + 1].x} ${pts[i + 1].y}`,
+          stroke: segmentStroke(i, i + 1),
+        }))
+      : null;
+
+  const lineD = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
   const areaD =
     pts.length === 1
       ? `M ${pts[0].x - 6} ${baseY} L ${pts[0].x + 6} ${baseY} L ${pts[0].x + 6} ${pts[0].y} L ${pts[0].x - 6} ${pts[0].y} Z`
       : `M ${pts[0].x} ${baseY} L ${pts.map((p) => `${p.x} ${p.y}`).join(' L ')} L ${pts[pts.length - 1].x} ${baseY} Z`;
+
+  const matchAreaSegments =
+    variant === 'match' && n > 1
+      ? Array.from({ length: n - 1 }, (_, i) => ({
+          key: `area-${i}`,
+          d: `M ${pts[i].x} ${baseY} L ${pts[i + 1].x} ${baseY} L ${pts[i + 1].x} ${pts[i + 1].y} L ${pts[i].x} ${pts[i].y} Z`,
+          fill: segmentStroke(i, i + 1),
+        }))
+      : null;
 
   const stroke = STROKE[variant] || STROKE.match;
   const gradId = `cumulative-chart-grad-${variant}-${reactId}`;
@@ -70,10 +103,12 @@ export default function CumulativePointsLineChart({ caption, values, variant = '
         aria-label={aria}
       >
         <defs>
-          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={stroke} stopOpacity="0.22" />
-            <stop offset="100%" stopColor={stroke} stopOpacity="0.02" />
-          </linearGradient>
+          {variant !== 'match' ? (
+            <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={stroke} stopOpacity="0.22" />
+              <stop offset="100%" stopColor={stroke} stopOpacity="0.02" />
+            </linearGradient>
+          ) : null}
         </defs>
 
         {tickVals.map((tv, i) => {
@@ -94,15 +129,64 @@ export default function CumulativePointsLineChart({ caption, values, variant = '
           );
         })}
 
-        <path d={areaD} fill={`url(#${gradId})`} className="cumulative-points-chart-area" />
-        <path d={lineD} fill="none" stroke={stroke} strokeWidth="2.25" strokeLinejoin="round" strokeLinecap="round" />
+        {variant === 'match' && matchAreaSegments ? (
+          matchAreaSegments.map((s) => (
+            <path
+              key={s.key}
+              d={s.d}
+              fill={s.fill}
+              fillOpacity={0.14}
+              className="cumulative-points-chart-area cumulative-points-chart-area--segment"
+            />
+          ))
+        ) : variant === 'match' ? (
+          <path
+            d={areaD}
+            fill={SEG.flat}
+            fillOpacity={0.14}
+            className="cumulative-points-chart-area"
+          />
+        ) : (
+          <path d={areaD} fill={`url(#${gradId})`} className="cumulative-points-chart-area" />
+        )}
+
+        {variant === 'match' && lineSegments
+          ? lineSegments.map((s) => (
+              <path
+                key={s.key}
+                d={s.d}
+                fill="none"
+                stroke={s.stroke}
+                strokeWidth="2.25"
+                strokeLinejoin="round"
+                strokeLinecap="round"
+              />
+            ))
+          : (
+              <path
+                d={lineD}
+                fill="none"
+                stroke={stroke}
+                strokeWidth="2.25"
+                strokeLinejoin="round"
+                strokeLinecap="round"
+              />
+            )}
 
         {showDots &&
-          pts.map((p, i) => (
-            <circle key={`d-${i}`} cx={p.x} cy={p.y} r="3.5" fill={stroke} stroke="#fff" strokeWidth="1.2">
-              <title>{`After match ${i + 1}: ${to2Decimals(p.raw)} pts`}</title>
-            </circle>
-          ))}
+          pts.map((p, i) => {
+            const dotFill =
+              variant === 'match' && i > 0
+                ? segmentStroke(i - 1, i)
+                : variant === 'match'
+                  ? SEG.flat
+                  : stroke;
+            return (
+              <circle key={`d-${i}`} cx={p.x} cy={p.y} r="3.5" fill={dotFill} stroke="#fff" strokeWidth="1.2">
+                <title>{`After match ${i + 1}: ${to2Decimals(p.raw)} pts`}</title>
+              </circle>
+            );
+          })}
 
         <text x={PAD.l + iw / 2} y={VB.h - 8} textAnchor="middle" className="cumulative-points-chart-xlabel">
           Matches (chronological)
