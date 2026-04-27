@@ -32,6 +32,7 @@ import {
   getInsightWrongAnswerPenalty,
   buildInsightRecalcFromSnapshots,
   computeRecalculatedInsightTotalsByUser,
+  insightMatchNetPoints,
 } from '../utils/insightScoring';
 
 function formatMatchTime(time) {
@@ -803,52 +804,61 @@ export default function Dashboard() {
           query(collection(db, 'cricket_questions'), where('approved', '==', true))
         );
         const counts = {};
-        const answeredQuestions = [];
         qSnap.docs.forEach((d) => {
           const data = d.data();
           const mid = data.matchId;
           const midKey = mid != null && String(mid).trim() !== '' ? String(mid).trim() : '';
           if (midKey) counts[midKey] = (counts[midKey] || 0) + 1;
-          if (data.correctAnswer != null) {
-            answeredQuestions.push({
-              id: d.id,
-              matchId: midKey,
-              correctAnswer: data.correctAnswer,
-              questionId: d.id,
-            });
-          }
         });
         setInsightQuestionCount(counts);
+
         const pointsByMatch = {};
-        if (answeredQuestions.length > 0 && user?.uid) {
+        if (user?.uid) {
           try {
-            const aSnap = await getDocs(
-              query(collection(db, 'cricket_answers'), where('userId', '==', user.uid))
-            );
+            const [aSnap, ptSnap, ciSnap] = await Promise.all([
+              getDocs(query(collection(db, 'cricket_answers'), where('userId', '==', user.uid))),
+              getDoc(doc(db, 'rules', 'pointRules')),
+              getDoc(doc(db, 'settings', 'cricketInsights')).catch(() => null),
+            ]);
+            const rules = ptSnap.exists() ? ptSnap.data() : {};
+            const ciData = ciSnap?.exists() ? ciSnap.data() : {};
+            const penalty = getInsightWrongAnswerPenalty({
+              cricketInsightsConfig: {
+                insightWrongAnswerPenalty:
+                  ciData.insightWrongAnswerPenalty != null && ciData.insightWrongAnswerPenalty !== ''
+                    ? Number(ciData.insightWrongAnswerPenalty)
+                    : undefined,
+              },
+              pointRules: rules,
+            });
+
+            const questionsByMatchId = {};
+            qSnap.docs.forEach((d) => {
+              const data = d.data();
+              const mid = data.matchId;
+              if (mid == null || String(mid).trim() === '') return;
+              const key = String(mid).trim();
+              if (!questionsByMatchId[key]) questionsByMatchId[key] = [];
+              questionsByMatchId[key].push({ id: d.id, ...data });
+            });
+
             const myAnswers = {};
             aSnap.docs.forEach((d) => {
               const x = d.data();
               const qid = x.questionId != null ? String(x.questionId) : '';
               if (qid) myAnswers[qid] = x.answer;
             });
-            answeredQuestions.forEach((q) => {
-              if (!q.matchId) return;
-              const myAns = (myAnswers[String(q.questionId)] || '').trim().toLowerCase();
-              const correct = (q.correctAnswer || '').trim().toLowerCase();
-              if (myAns && correct && myAns === correct) {
-                pointsByMatch[q.matchId] = (pointsByMatch[q.matchId] || 0) + 1;
+
+            Object.keys(questionsByMatchId).forEach((mid) => {
+              const net = insightMatchNetPoints(questionsByMatchId[mid], myAnswers, penalty);
+              if (net !== 0) {
+                pointsByMatch[mid] = net;
               }
             });
           } catch {
-            /* ignore */
+            /* ignore per-match insight totals */
           }
         }
-        all.forEach(m => {
-          const stored = m.insightPointResults?.[user?.uid];
-          if (stored != null && stored !== undefined) {
-            pointsByMatch[m.id] = Number(stored);
-          }
-        });
         setInsightPointsByMatch(pointsByMatch);
       } catch {
         setInsightQuestionCount({});
