@@ -15,6 +15,10 @@ import {
 import { getMatchPredictionCutoffDate, isPredictionEligible } from '../utils/match';
 import { getAppTodayDate } from '../utils/calendarDate';
 import { getPredictionSavedIso, formatTimeHH24 } from '../utils/predictionTime';
+import {
+  getSortedPredictionChangeLog,
+  formatPredictionHistoryLocalTime,
+} from '../utils/predictionChangeLog';
 import { formatInsightUserLabel } from '../utils/insightQuestions';
 import { getInsightWrongAnswerPenalty, insightPointDeltaOnAnswerChange } from '../utils/insightScoring';
 import PredictionContextsAdminPanel from '../components/PredictionContextsAdminPanel';
@@ -242,6 +246,8 @@ export default function Admin() {
   const [expandedInsightMatchId, setExpandedInsightMatchId] = useState(null);
   const [participantsModal, setParticipantsModal] = useState(null);
   const [participantsLoading, setParticipantsLoading] = useState(false);
+  /** { match, displayName, entries: { predictedWinner, atIso }[] } */
+  const [predictionHistoryModal, setPredictionHistoryModal] = useState(null);
   const [pointsExportFrom, setPointsExportFrom] = useState(() => {
     const t = getAppTodayDate();
     const [y, m] = t.split('-').map(Number);
@@ -283,6 +289,7 @@ export default function Admin() {
         predMap.set(userId, {
           predictedWinner: data.predictedWinner,
           predictedAtIso: getPredictionSavedIso(data),
+          changeLogSorted: getSortedPredictionChangeLog(data),
         });
       });
       const allUsersList = (allUsers || []).filter(u => !u.isAdmin && u.isAdmin !== 'true');
@@ -291,7 +298,8 @@ export default function Admin() {
         const pred = predMap.get(u.id);
         const predictedWinner = pred?.predictedWinner ?? null;
         const predictedAtIso = pred?.predictedAtIso ?? null;
-        return { userId: u.id, predictedWinner, predictedAtIso, displayName };
+        const changeLogSorted = pred?.changeLogSorted ?? [];
+        return { userId: u.id, predictedWinner, predictedAtIso, displayName, changeLogSorted };
       }).sort((a, b) => (a.displayName || '').localeCompare(b.displayName || ''));
       setParticipantsModal(prev => prev && prev.match?.id === match.id ? { ...prev, match: matchData, participants } : prev);
     } catch (err) {
@@ -2697,7 +2705,7 @@ export default function Admin() {
                           type="button"
                           className="btn btn-sm btn-outline btn-icon-only"
                           onClick={() => openParticipantsModal(m)}
-                          title="View participants and their points"
+                          title="Participants: name and save time only before prediction cutoff; team, history count, and points after cutoff"
                           aria-label="View participants"
                         >
                           👥
@@ -2931,48 +2939,80 @@ export default function Admin() {
                     <>
                       {(() => {
                         const m = participantsModal.match;
-                        const predictionsHidden = isPredictionEligible(m);
+                        const beforeCutoff = isPredictionEligible(m);
+                        const showPickAndHistory = !beforeCutoff;
                         const isCompleted = (m?.status || '').toLowerCase() === 'completed' && (m?.winner || '').trim();
                         const pointResults = m?.pointResults && typeof m.pointResults === 'object' ? m.pointResults : null;
                         const showPoints = isCompleted && pointResults;
-                        const showPredictedTime = !predictionsHidden;
-                        const colClass = predictionsHidden
-                          ? 'cols-2'
+                        const colClass = !showPickAndHistory
+                          ? showPoints
+                            ? 'participant-grid--admin-3-cutoff'
+                            : 'participant-grid--admin-2-cutoff'
                           : showPoints
-                            ? 'cols-4'
-                            : 'cols-3';
+                            ? 'participant-grid--admin-5'
+                            : 'participant-grid--admin-4';
                         return (
                           <>
-                            {predictionsHidden && (
+                            {beforeCutoff ? (
                               <p className="muted participants-points-note">
-                                Team picks stay hidden until the prediction cutoff ({formatMatchTime(m?.thresholdTime || m?.time)} on {m?.date}).
+                                Before the prediction cutoff ({formatMatchTime(m?.thresholdTime || m?.time)} on {m?.date}), only each
+                                participant&apos;s name and when they saved a pick are shown. Predicted team, history count, and full
+                                history are visible after cutoff. Points still appear here when the match is completed and scored.
                               </p>
-                            )}
-                            {showPoints && (
-                              <p className="muted participants-points-note">Points for this match (after winner declared):</p>
+                            ) : (
+                              <p className="muted participants-points-note">
+                                <strong>History</strong> is the number of saved prediction versions for this match (first pick plus each
+                                time they switched teams). Click the number to see every version with time and team, oldest first. Points
+                                appear after the match is completed and you have saved scores.
+                              </p>
                             )}
                             <ul className="participants-list">
                               <li className={`participants-list-header ${colClass}`}>
                                 <span>User</span>
-                                <span>Prediction</span>
-                                {showPredictedTime && <span className="col-predicted-at">Predicted at</span>}
+                                {showPickAndHistory && <span>Prediction</span>}
+                                <span className="col-predicted-at">Predicted at</span>
+                                {showPickAndHistory && <span className="col-history">History</span>}
                                 {showPoints && <span className="col-points">Points</span>}
                               </li>
                               {participantsModal.participants.map((p, i) => {
                                 const pts = showPoints && p.userId ? pointResults[p.userId] : undefined;
                                 const ptsNum = pts != null && !Number.isNaN(Number(pts)) ? Number(pts) : null;
-                                const timeStr = showPredictedTime ? formatTimeHH24(p.predictedAtIso) : null;
+                                const timeStr = formatTimeHH24(p.predictedAtIso);
+                                const log = p.changeLogSorted || [];
+                                const historyCount = log.length;
+                                const updateCount = Math.max(0, historyCount - 1);
                                 return (
                                   <li key={p.userId || i} className={`participant-item ${colClass}`}>
                                     <span className="participant-name">{p.displayName}</span>
-                                    <span className="participant-prediction">
-                                      {predictionsHidden
-                                        ? '—'
-                                        : (p.predictedWinner ? (getTeamCode(p.predictedWinner, teams) || p.predictedWinner) : '—')}
+                                    {showPickAndHistory && (
+                                      <span className="participant-prediction">
+                                        {p.predictedWinner ? (getTeamCode(p.predictedWinner, teams) || p.predictedWinner) : '—'}
+                                      </span>
+                                    )}
+                                    <span className="participant-predicted-at" title={p.predictedAtIso || undefined}>
+                                      {timeStr}
                                     </span>
-                                    {showPredictedTime && (
-                                      <span className="participant-predicted-at" title={p.predictedAtIso || undefined}>
-                                        {timeStr}
+                                    {showPickAndHistory && (
+                                      <span className="participant-change-count-cell">
+                                        {log.length > 0 ? (
+                                          <button
+                                            type="button"
+                                            className="btn btn-link participant-pred-changes-btn"
+                                            onClick={() =>
+                                              setPredictionHistoryModal({
+                                                match: m,
+                                                displayName: p.displayName,
+                                                entries: log.map((e) => ({ ...e })),
+                                              })
+                                            }
+                                            title={`${historyCount} saved version(s) for this match (${updateCount} update(s) after the first). Click for full timeline.`}
+                                            aria-label={`Prediction history for ${p.displayName}: ${historyCount} saved version(s), ${updateCount} update(s) after first pick`}
+                                          >
+                                            {historyCount}
+                                          </button>
+                                        ) : (
+                                          <span className="muted">—</span>
+                                        )}
                                       </span>
                                     )}
                                     {showPoints && (
@@ -2988,6 +3028,75 @@ export default function Admin() {
                         );
                       })()}
                     </>
+                  )}
+                </div>
+              </div>
+            )}
+            {predictionHistoryModal && (
+              <div
+                className="modal-overlay"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="prediction-history-title"
+                onClick={() => setPredictionHistoryModal(null)}
+              >
+                <div className="modal-content participants-modal prediction-history-modal" onClick={(e) => e.stopPropagation()}>
+                  <div className="modal-header">
+                    <h3 id="prediction-history-title">Prediction history — {predictionHistoryModal.displayName}</h3>
+                    <button type="button" className="modal-close" onClick={() => setPredictionHistoryModal(null)} aria-label="Close">
+                      &times;
+                    </button>
+                  </div>
+                  <p className="muted" style={{ marginTop: 0 }}>
+                    {getTeamCode(predictionHistoryModal.match?.team1, teams)} vs{' '}
+                    {getTeamCode(predictionHistoryModal.match?.team2, teams)}
+                    {predictionHistoryModal.match?.date ? ` · ${predictionHistoryModal.match.date}` : ''}
+                  </p>
+                  {(() => {
+                    const n = predictionHistoryModal.entries.length;
+                    const updatesAfterFirst = Math.max(0, n - 1);
+                    return (
+                      <p className="muted prediction-history-summary">
+                        <strong>{n}</strong> saved version{n === 1 ? '' : 's'} in the log below (oldest → newest). Pick was updated{' '}
+                        <strong>{updatesAfterFirst}</strong> time{updatesAfterFirst === 1 ? '' : 's'} after the first save.
+                      </p>
+                    );
+                  })()}
+                  {predictionHistoryModal.entries.length === 0 ? (
+                    <p className="muted">No saved history for this match.</p>
+                  ) : (
+                    <table className="prediction-history-table">
+                      <thead>
+                        <tr>
+                          <th scope="col" className="prediction-history-col-idx">
+                            #
+                          </th>
+                          <th scope="col">Time</th>
+                          <th scope="col" className="prediction-history-col-from">
+                            From (previous)
+                          </th>
+                          <th scope="col" className="prediction-history-col-team">
+                            To (saved)
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {predictionHistoryModal.entries.map((e, idx) => {
+                          const fromWinner = idx > 0 ? predictionHistoryModal.entries[idx - 1].predictedWinner : '';
+                          const fromLabel =
+                            idx === 0 ? '—' : getTeamCode(fromWinner, teams) || fromWinner;
+                          const toLabel = getTeamCode(e.predictedWinner, teams) || e.predictedWinner;
+                          return (
+                            <tr key={`${e.atIso}-${idx}-${e.predictedWinner}`}>
+                              <td className="prediction-history-idx">{idx + 1}</td>
+                              <td className="prediction-history-time">{formatPredictionHistoryLocalTime(e.atIso)}</td>
+                              <td className="prediction-history-from">{fromLabel}</td>
+                              <td className="prediction-history-team">{toLabel}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   )}
                 </div>
               </div>

@@ -4248,6 +4248,98 @@ button.stat-card.stat-card-clickable.stat-card--win-loss:hover {
   font-size: 0.8rem;
 }
 
+.participants-list-header .col-changes,
+.participants-list-header .col-history {
+  text-align: center;
+  font-size: 0.8rem;
+}
+
+/* Admin participants before prediction cutoff: User + Predicted at [, Points] */
+.participants-list-header.participant-grid--admin-2-cutoff,
+.participant-item.participant-grid--admin-2-cutoff {
+  grid-template-columns: minmax(0, 1fr) 4.5rem;
+}
+
+.participants-list-header.participant-grid--admin-3-cutoff,
+.participant-item.participant-grid--admin-3-cutoff {
+  grid-template-columns: minmax(0, 1fr) 4.5rem 4rem;
+}
+
+/* Admin match participants: User, Prediction, Time, Changes [, Points] */
+.participants-list-header.participant-grid--admin-4,
+.participant-item.participant-grid--admin-4 {
+  grid-template-columns: minmax(0, 1fr) auto 4.5rem 3rem;
+}
+
+.participants-list-header.participant-grid--admin-5,
+.participant-item.participant-grid--admin-5 {
+  grid-template-columns: minmax(0, 1fr) auto 4.5rem 3rem 4rem;
+}
+
+.participant-change-count-cell {
+  text-align: center;
+  justify-self: center;
+}
+
+button.participant-pred-changes-btn {
+  padding: 0 0.15rem;
+  font-variant-numeric: tabular-nums;
+  min-width: 1.5rem;
+}
+
+.prediction-history-modal .prediction-history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  margin-top: 0.5rem;
+}
+
+.prediction-history-modal .prediction-history-table th,
+.prediction-history-modal .prediction-history-table td {
+  padding: 0.45rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.prediction-history-modal .prediction-history-table th {
+  font-weight: 600;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.prediction-history-modal .prediction-history-col-idx,
+.prediction-history-modal .prediction-history-idx {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  width: 2rem;
+  color: var(--text-muted);
+}
+
+.prediction-history-modal .prediction-history-col-team,
+.prediction-history-modal .prediction-history-team {
+  text-align: right;
+  font-weight: 600;
+  color: var(--cricket-green);
+}
+
+.prediction-history-modal .prediction-history-col-from,
+.prediction-history-modal .prediction-history-from {
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.prediction-history-modal .prediction-history-time {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.modal-content.participants-modal.prediction-history-modal {
+  max-width: min(100%, 44rem);
+}
+
 .participant-item {
   display: grid;
   grid-template-columns: 1fr auto 4rem;
@@ -4286,6 +4378,11 @@ button.stat-card.stat-card-clickable.stat-card--win-loss:hover {
   color: var(--cricket-green);
   font-weight: 600;
   white-space: nowrap;
+}
+
+.participant-prediction.participant-prediction--hidden {
+  color: var(--text-muted);
+  font-weight: 500;
 }
 
 /* Season challenge participants modal: title + count + close */

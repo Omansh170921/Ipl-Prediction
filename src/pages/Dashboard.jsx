@@ -21,6 +21,7 @@ import {
 } from '../utils/points';
 import { isPredictionEligible, shouldShowCrowdPrediction } from '../utils/match';
 import { getPredictionSavedIso, formatTimeHH24 } from '../utils/predictionTime';
+import { resolvePredictionChangeLogForPersist } from '../utils/predictionChangeLog';
 import {
   isMatchCompletedWithResult,
   hasTeamWinnerForScoring,
@@ -1200,14 +1201,27 @@ export default function Dashboard() {
       const predRef = doc(db, 'predictions', `${user.uid}_${matchId}`);
       const existing = await getDoc(predRef);
       const now = new Date().toISOString();
-      await setDoc(predRef, {
-        userId: user.uid,
-        matchId,
+      const prevData = existing.exists() ? existing.data() : null;
+      const { predictionChangeLog } = resolvePredictionChangeLogForPersist(
+        prevData,
+        existing.exists(),
         predictedWinner,
-        username: userProfile?.username,
-        updatedAt: now,
-        ...(!existing.exists() ? { createdAt: now } : {}),
-      }, { merge: true });
+        now
+      );
+
+      await setDoc(
+        predRef,
+        {
+          userId: user.uid,
+          matchId,
+          predictedWinner,
+          username: userProfile?.username,
+          updatedAt: now,
+          ...(!existing.exists() ? { createdAt: now } : {}),
+          ...(predictionChangeLog != null ? { predictionChangeLog } : {}),
+        },
+        { merge: true }
+      );
       const key = String(matchId);
       setPredictions(prev => ({ ...prev, [key]: predictedWinner }));
       setSavedPredictions(prev => ({ ...prev, [key]: predictedWinner }));
@@ -2143,17 +2157,15 @@ export default function Dashboard() {
               {filteredMatches.map((match, idx) => (
                 <div key={match.id} id={`match-${match.id}`} className="match-card">
                   <div className="match-card-icons">
-                    {!isPredictionEligible(match) && (
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline btn-icon-only"
-                        onClick={() => openParticipantsModal(match)}
-                        title="View all participants and their predictions"
-                        aria-label="View all participants"
-                      >
-                        👥
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline btn-icon-only"
+                      onClick={() => openParticipantsModal(match)}
+                      title="View participants: your pick only until cutoff, then everyone else's picks; points when scored"
+                      aria-label="View all participants"
+                    >
+                      👥
+                    </button>
                     {cricketInsightsConfig.enabled && (match.date || '') <= today && (
                       <button
                         type="button"
@@ -2335,17 +2347,15 @@ export default function Dashboard() {
                   {historyMatches.map((match, idx) => (
                     <div key={match.id} id={`match-${match.id}`} className="match-card match-card-history">
                       <div className="match-card-icons">
-                        {!isPredictionEligible(match) && (
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-outline btn-icon-only"
-                            onClick={() => openParticipantsModal(match)}
-                            title="View all participants and their predictions"
-                            aria-label="View all participants"
-                          >
-                            👥
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline btn-icon-only"
+                          onClick={() => openParticipantsModal(match)}
+                          title="View participants: your pick only until cutoff, then everyone else's picks; points when scored"
+                          aria-label="View all participants"
+                        >
+                          👥
+                        </button>
                         {cricketInsightsConfig.enabled && (match.date || '') <= today && (
                           <button
                             type="button"
@@ -2534,21 +2544,23 @@ export default function Dashboard() {
               <>
                 {(() => {
                   const m = participantsModal.match;
-                  const predictionsHidden = isPredictionEligible(m);
+                  const beforeCutoff = isPredictionEligible(m);
                   const isCompleted = isMatchCompletedWithResult(m);
                   const pointResults = m?.pointResults && typeof m.pointResults === 'object' ? m.pointResults : null;
                   const showPoints = isCompleted && pointResults;
-                  const showPredictedTime = !predictionsHidden;
-                  const colClass = predictionsHidden
-                    ? 'cols-2'
-                    : showPoints
-                      ? 'cols-4'
-                      : 'cols-3';
+                  const colClass = showPoints ? 'cols-4' : 'cols-3';
                   return (
                     <>
-                      {predictionsHidden && (
+                      {beforeCutoff && (
                         <p className="muted participants-points-note">
-                          Team picks stay hidden until the prediction cutoff ({formatMatchTime(m?.thresholdTime || m?.time)} on {m?.date}).
+                          Before the prediction cutoff ({formatMatchTime(m?.thresholdTime || m?.time)} on {m?.date}), you only see
+                          your own team pick; everyone else&apos;s stay private. After cutoff, all picks are visible; points show once
+                          the match is completed and scored.
+                        </p>
+                      )}
+                      {!beforeCutoff && !showPoints && (
+                        <p className="muted participants-points-note">
+                          Team picks are visible. Points appear after the match is completed and an admin has calculated them.
                         </p>
                       )}
                       {showPoints && (
@@ -2558,26 +2570,32 @@ export default function Dashboard() {
                         <li className={`participants-list-header ${colClass}`}>
                           <span>User</span>
                           <span>Prediction</span>
-                          {showPredictedTime && <span className="col-predicted-at">Predicted at</span>}
+                          <span className="col-predicted-at">Predicted at</span>
                           {showPoints && <span className="col-points">Points</span>}
                         </li>
                         {participantsModal.participants.map((p, i) => {
                     const pts = showPoints && p.userId ? pointResults[p.userId] : undefined;
                     const ptsNum = pts != null && !Number.isNaN(Number(pts)) ? to2Decimals(Number(pts)) : null;
-                    const timeStr = showPredictedTime ? formatTimeHH24(p.predictedAtIso) : null;
+                    const timeStr = formatTimeHH24(p.predictedAtIso);
+                    const canSeeThisPick = !beforeCutoff || p.userId === user?.uid;
+                    const pickDisplay = (() => {
+                      if (!p.predictedWinner) return { text: '—', title: undefined };
+                      const code = getTeamCode(p.predictedWinner, teams) || p.predictedWinner;
+                      if (canSeeThisPick) return { text: code, title: undefined };
+                      return { text: '—', title: 'Hidden until prediction cutoff' };
+                    })();
                     return (
                       <li key={p.userId || i} className={`participant-item ${colClass}`}>
                         <span className="participant-name">{p.displayName}</span>
-                        <span className="participant-prediction">
-                          {predictionsHidden
-                            ? '—'
-                            : (p.predictedWinner ? (getTeamCode(p.predictedWinner, teams) || p.predictedWinner) : '—')}
+                        <span
+                          className={`participant-prediction${!canSeeThisPick && p.predictedWinner ? ' participant-prediction--hidden' : ''}`}
+                          title={pickDisplay.title}
+                        >
+                          {pickDisplay.text}
                         </span>
-                        {showPredictedTime && (
-                          <span className="participant-predicted-at" title={p.predictedAtIso || undefined}>
-                            {timeStr}
-                          </span>
-                        )}
+                        <span className="participant-predicted-at" title={p.predictedAtIso || undefined}>
+                          {timeStr}
+                        </span>
                         {showPoints && (
                           <span className={`participant-points ${ptsNum != null && ptsNum >= 0 ? 'points-positive' : 'points-negative'}`}>
                             {ptsNum != null ? (ptsNum >= 0 ? '+' : '') + ptsNum : '—'}
