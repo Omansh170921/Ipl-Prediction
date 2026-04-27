@@ -2705,7 +2705,7 @@ export default function Admin() {
                           type="button"
                           className="btn btn-sm btn-outline btn-icon-only"
                           onClick={() => openParticipantsModal(m)}
-                          title="Participants: name and save time only before prediction cutoff; team, history count, and points after cutoff"
+                          title="Participants: names only before prediction cutoff; team, times, history after cutoff; points when scored"
                           aria-label="View participants"
                         >
                           👥
@@ -2944,10 +2944,11 @@ export default function Admin() {
                         const isCompleted = (m?.status || '').toLowerCase() === 'completed' && (m?.winner || '').trim();
                         const pointResults = m?.pointResults && typeof m.pointResults === 'object' ? m.pointResults : null;
                         const showPoints = isCompleted && pointResults;
+                        const showPredictedAt = showPickAndHistory;
                         const colClass = !showPickAndHistory
                           ? showPoints
-                            ? 'participant-grid--admin-3-cutoff'
-                            : 'participant-grid--admin-2-cutoff'
+                            ? 'participant-grid--admin-cutoff-user-points'
+                            : 'participant-grid--admin-cutoff-user-only'
                           : showPoints
                             ? 'participant-grid--admin-5'
                             : 'participant-grid--admin-4';
@@ -2956,8 +2957,8 @@ export default function Admin() {
                             {beforeCutoff ? (
                               <p className="muted participants-points-note">
                                 Before the prediction cutoff ({formatMatchTime(m?.thresholdTime || m?.time)} on {m?.date}), only each
-                                participant&apos;s name and when they saved a pick are shown. Predicted team, history count, and full
-                                history are visible after cutoff. Points still appear here when the match is completed and scored.
+                                participant&apos;s name is shown. Predicted team, save times, history count, and full history are visible
+                                after cutoff. Points still appear here when the match is completed and scored.
                               </p>
                             ) : (
                               <p className="muted participants-points-note">
@@ -2970,7 +2971,7 @@ export default function Admin() {
                               <li className={`participants-list-header ${colClass}`}>
                                 <span>User</span>
                                 {showPickAndHistory && <span>Prediction</span>}
-                                <span className="col-predicted-at">Predicted at</span>
+                                {showPredictedAt && <span className="col-predicted-at">Predicted at</span>}
                                 {showPickAndHistory && <span className="col-history">History</span>}
                                 {showPoints && <span className="col-points">Points</span>}
                               </li>
@@ -2989,9 +2990,11 @@ export default function Admin() {
                                         {p.predictedWinner ? (getTeamCode(p.predictedWinner, teams) || p.predictedWinner) : '—'}
                                       </span>
                                     )}
-                                    <span className="participant-predicted-at" title={p.predictedAtIso || undefined}>
-                                      {timeStr}
-                                    </span>
+                                    {showPredictedAt && (
+                                      <span className="participant-predicted-at" title={p.predictedAtIso || undefined}>
+                                        {timeStr}
+                                      </span>
+                                    )}
                                     {showPickAndHistory && (
                                       <span className="participant-change-count-cell">
                                         {log.length > 0 ? (

@@ -2015,8 +2015,17 @@ export default function Dashboard() {
                               </button>
                               <span className="points-positive">{u.insightPoints ?? 0}</span>
                               {showWinnerLoser && (
-                                <span title={isWinner ? `Winner (top ${100 - loserVal}%)` : `Loser (bottom ${loserVal}%)`} className="leaderboard-wl-symbol">
-                                  {isWinner ? '🏆' : '📉'}
+                                <span
+                                  title={
+                                    u.rank === 1
+                                      ? isWinner
+                                        ? `Winner (top ${100 - loserVal}%)`
+                                        : `Loser (bottom ${loserVal}%)`
+                                      : undefined
+                                  }
+                                  className="leaderboard-wl-symbol"
+                                >
+                                  {u.rank === 1 ? (isWinner ? '🏆' : '📉') : ''}
                                 </span>
                               )}
                             </div>
@@ -2161,7 +2170,7 @@ export default function Dashboard() {
                       type="button"
                       className="btn btn-sm btn-outline btn-icon-only"
                       onClick={() => openParticipantsModal(match)}
-                      title="View participants: your pick only until cutoff, then everyone else's picks; points when scored"
+                      title="View participants: your pick only until cutoff (no save times); after cutoff all picks and times; points when scored"
                       aria-label="View all participants"
                     >
                       👥
@@ -2351,7 +2360,7 @@ export default function Dashboard() {
                           type="button"
                           className="btn btn-sm btn-outline btn-icon-only"
                           onClick={() => openParticipantsModal(match)}
-                          title="View participants: your pick only until cutoff, then everyone else's picks; points when scored"
+                          title="View participants: your pick only until cutoff (no save times); after cutoff all picks and times; points when scored"
                           aria-label="View all participants"
                         >
                           👥
@@ -2545,17 +2554,24 @@ export default function Dashboard() {
                 {(() => {
                   const m = participantsModal.match;
                   const beforeCutoff = isPredictionEligible(m);
+                  const showPredictedAt = !beforeCutoff;
                   const isCompleted = isMatchCompletedWithResult(m);
                   const pointResults = m?.pointResults && typeof m.pointResults === 'object' ? m.pointResults : null;
                   const showPoints = isCompleted && pointResults;
-                  const colClass = showPoints ? 'cols-4' : 'cols-3';
+                  const colClass = beforeCutoff
+                    ? showPoints
+                      ? 'cols-dashboard-pre-cutoff-3'
+                      : 'cols-2'
+                    : showPoints
+                      ? 'cols-4'
+                      : 'cols-3';
                   return (
                     <>
                       {beforeCutoff && (
                         <p className="muted participants-points-note">
                           Before the prediction cutoff ({formatMatchTime(m?.thresholdTime || m?.time)} on {m?.date}), you only see
-                          your own team pick; everyone else&apos;s stay private. After cutoff, all picks are visible; points show once
-                          the match is completed and scored.
+                          your own team pick; everyone else&apos;s stay private. Save times and everyone&apos;s picks appear after
+                          cutoff; points show once the match is completed and scored.
                         </p>
                       )}
                       {!beforeCutoff && !showPoints && (
@@ -2570,7 +2586,7 @@ export default function Dashboard() {
                         <li className={`participants-list-header ${colClass}`}>
                           <span>User</span>
                           <span>Prediction</span>
-                          <span className="col-predicted-at">Predicted at</span>
+                          {showPredictedAt && <span className="col-predicted-at">Predicted at</span>}
                           {showPoints && <span className="col-points">Points</span>}
                         </li>
                         {participantsModal.participants.map((p, i) => {
@@ -2593,9 +2609,11 @@ export default function Dashboard() {
                         >
                           {pickDisplay.text}
                         </span>
-                        <span className="participant-predicted-at" title={p.predictedAtIso || undefined}>
-                          {timeStr}
-                        </span>
+                        {showPredictedAt && (
+                          <span className="participant-predicted-at" title={p.predictedAtIso || undefined}>
+                            {timeStr}
+                          </span>
+                        )}
                         {showPoints && (
                           <span className={`participant-points ${ptsNum != null && ptsNum >= 0 ? 'points-positive' : 'points-negative'}`}>
                             {ptsNum != null ? (ptsNum >= 0 ? '+' : '') + ptsNum : '—'}
@@ -2795,7 +2813,7 @@ export default function Dashboard() {
               </div>
               <button type="button" className="modal-close" onClick={() => setShowInsightHistoryModal(false)} aria-label="Close">&times;</button>
             </div>
-            <div className="insight-history-body">
+            <div className="point-history-body">
               <InsightHistoryModalContent
                 userId={user.uid}
                 completedMatches={sortMatchesChronological(
@@ -2890,7 +2908,7 @@ export default function Dashboard() {
 
               if (historyMode === 'insight') {
                 return (
-                  <div className="insight-history-body">
+                  <div className="point-history-body">
                     <InsightHistoryModalContent
                       userId={uid}
                       completedMatches={completed}

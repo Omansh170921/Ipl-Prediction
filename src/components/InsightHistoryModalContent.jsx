@@ -202,7 +202,7 @@ export default function InsightHistoryModalContent({
         {to2Decimals(wrongAnswerPenalty)}), the same rule as when admins score questions. Running total is the sum of those match scores.
       </p>
 
-      <div className="points-history-scroll insight-history-scroll">
+      <div className="points-history-scroll point-history-scroll">
         <ul className="insight-history-cards">
           {rows.map(({ m, totalQ, attempted, correct, wrong, pointsEarned, runningInsight: ri }) => (
             <li key={m.id} className="insight-history-card">
