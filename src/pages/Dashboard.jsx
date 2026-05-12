@@ -16,6 +16,7 @@ import { getAppTodayDate } from '../utils/calendarDate';
 import {
   calculateLeaderboard,
   expectedPointsIfWinner,
+  getMatchPointsMultiplier,
   to2Decimals,
   sumSeasonContestLeaderboardPoints,
 } from '../utils/points';
@@ -462,6 +463,14 @@ function getTeamCode(teamName, teams) {
   return (t?.code || '').trim() || teamName || '';
 }
 
+/** Label for match filter tags / dropdowns; optional display name prefix. */
+function formatMatchFilterLabel(m, teams, indexInList) {
+  const i = typeof indexInList === 'number' ? indexInList : 0;
+  const displayName = (m?.matchName || '').trim();
+  const core = `${m.matchNumber || (i + 1)} - ${getTeamCode(m.team1, teams)} vs ${getTeamCode(m.team2, teams)}`;
+  return displayName ? `${displayName} · ${core}` : core;
+}
+
 function formatMatchVenue(match) {
   const stadium = (match?.stadium || '').trim();
   const city = (match?.city || '').trim();
@@ -683,13 +692,13 @@ export default function Dashboard() {
     .sort((a, b) => getMatchNum(a) - getMatchNum(b))
     .map((m, i) => ({
       id: m.id,
-      label: `${m.matchNumber || (i + 1)} - ${getTeamCode(m.team1, teams)} vs ${getTeamCode(m.team2, teams)}`,
+      label: formatMatchFilterLabel(m, teams, i),
     }));
   const historyMatchList = matchFilterDate ? dateFilteredMatches : allMatches;
   const matchOptionsHistory = sortHistoryMatchesForDisplay(historyMatchList, !matchFilterDate)
     .map((m, i) => ({
       id: m.id,
-      label: `${m.matchNumber || (i + 1)} - ${getTeamCode(m.team1, teams)} vs ${getTeamCode(m.team2, teams)}`,
+      label: formatMatchFilterLabel(m, teams, i),
       date: m.date,
     }));
 
@@ -1298,7 +1307,7 @@ export default function Dashboard() {
             {expIfTeam1Wins != null && (
               <span
                 className="crowd-expected-pts"
-                title="Points each correct predictor gets if this team wins (from current picks and scoring rules)"
+                title={"Points each correct predictor gets if this team wins (including this match's winner multiplier, if any; wrong/no-pick penalties are never multiplied)"}
               >
                 {' '}
                 (+{expIfTeam1Wins})
@@ -1312,7 +1321,7 @@ export default function Dashboard() {
             {expIfTeam2Wins != null && (
               <span
                 className="crowd-expected-pts"
-                title="Points each correct predictor gets if this team wins (from current picks and scoring rules)"
+                title={"Points each correct predictor gets if this team wins (including this match's winner multiplier, if any; wrong/no-pick penalties are never multiplied)"}
               >
                 {' '}
                 (+{expIfTeam2Wins})
@@ -2175,6 +2184,11 @@ export default function Dashboard() {
             <div className="matches-grid">
               {filteredMatches.map((match, idx) => (
                 <div key={match.id} id={`match-${match.id}`} className="match-card">
+                  {(match.matchName || '').trim() && (
+                    <div className="match-card-name" title={(match.matchName || '').trim()}>
+                      {(match.matchName || '').trim()}
+                    </div>
+                  )}
                   <div className="match-card-icons">
                     <button
                       type="button"
@@ -2199,6 +2213,14 @@ export default function Dashboard() {
                     )}
                   </div>
                   <div className="match-info">
+                    {getMatchPointsMultiplier(match) !== 1 && (
+                      <span
+                        className="match-points-multiplier-badge"
+                        title="Winner pool share for this match is multiplied; wrong and no-prediction penalties are not"
+                      >
+                        ×{getMatchPointsMultiplier(match)}
+                      </span>
+                    )}
                     <span className="match-number">{match.matchNumber || (idx + 1)}/{maxMatchId}</span>
                     <span className="match-slot">{formatMatchTime(match.time || match.slot)}</span>
                     {(match.thresholdTime || match.time) && (
@@ -2365,6 +2387,11 @@ export default function Dashboard() {
                 <div className="matches-grid history-grid">
                   {historyMatches.map((match, idx) => (
                     <div key={match.id} id={`match-${match.id}`} className="match-card match-card-history">
+                      {(match.matchName || '').trim() && (
+                        <div className="match-card-name" title={(match.matchName || '').trim()}>
+                          {(match.matchName || '').trim()}
+                        </div>
+                      )}
                       <div className="match-card-icons">
                         <button
                           type="button"
@@ -2389,6 +2416,14 @@ export default function Dashboard() {
                         )}
                       </div>
                       <div className="match-info">
+                        {getMatchPointsMultiplier(match) !== 1 && (
+                          <span
+                            className="match-points-multiplier-badge"
+                            title="Winner pool share for this match is multiplied; wrong and no-prediction penalties are not"
+                          >
+                            ×{getMatchPointsMultiplier(match)}
+                          </span>
+                        )}
                         <span className="match-number">{match.matchNumber || (idx + 1)}/{maxMatchId}</span>
                         <div className="match-meta-row">
                           <span className="match-date">{match.date}</span>

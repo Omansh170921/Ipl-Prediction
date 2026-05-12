@@ -3,12 +3,23 @@ import { isDrawOrCancelledWinner } from './matchOutcomes.js';
 export const to2Decimals = (n) => Math.round(Number(n) * 100) / 100;
 
 /**
+ * Per-match multiplier applied only to pool points for correct predictions (winners).
+ * Wrong and not-participated penalties are never multiplied. Default 1 when missing/invalid.
+ */
+export function getMatchPointsMultiplier(match) {
+  const raw = match?.pointsMultiplier;
+  const n = typeof raw === 'number' ? raw : parseFloat(String(raw ?? '').replace(',', '.'));
+  if (!Number.isFinite(n) || n <= 0) return 1;
+  return n;
+}
+
+/**
  * Calculate points for a completed match.
  * @param {Object} match - Match with winner, team1, team2
  * @param {Array} allUsers - All users { id, username, ... }
  * @param {Array} matchPredictions - Predictions for this match { userId, predictedWinner }
  * @param {Object} pointRules - { notParticipatedPoints: number, wrongPredictionPoints: number } (positive values, applied as negative)
- * @returns {Object} { userPoints: { userId: number }, summary: { totalUsers, winners, wrong, notParticipated, pool } }
+ * @returns {Object} { userPoints, summary: { pool, basePointsPerWinner, pointsMultiplier, pointsPerWinner, ... } }
  */
 export function calculateMatchPoints(match, allUsers, matchPredictions, pointRules) {
   const notParticipatedPenalty = Math.abs(Number(pointRules?.notParticipatedPoints) || 7);
@@ -24,6 +35,8 @@ export function calculateMatchPoints(match, allUsers, matchPredictions, pointRul
         notParticipated: 0,
         pool: 0,
         pointsPerWinner: 0,
+        basePointsPerWinner: 0,
+        pointsMultiplier: 1,
       },
     };
   }
@@ -52,7 +65,9 @@ export function calculateMatchPoints(match, allUsers, matchPredictions, pointRul
   });
 
   const pool = to2Decimals(wrong.length * wrongPenalty + notParticipated.length * notParticipatedPenalty);
-  const pointsPerWinner = to2Decimals(winners.length > 0 ? pool / winners.length : 0);
+  const basePointsPerWinner = to2Decimals(winners.length > 0 ? pool / winners.length : 0);
+  const pointsMultiplier = getMatchPointsMultiplier(match);
+  const pointsPerWinner = to2Decimals(basePointsPerWinner * pointsMultiplier);
 
   const userPoints = {};
   wrong.forEach(uid => { userPoints[uid] = to2Decimals(-wrongPenalty); });
@@ -67,6 +82,10 @@ export function calculateMatchPoints(match, allUsers, matchPredictions, pointRul
       wrong: wrong.length,
       notParticipated: notParticipated.length,
       pool,
+      /** Share of pool per correct prediction before multiplier */
+      basePointsPerWinner,
+      pointsMultiplier,
+      /** Points each correct predictor receives (after multiplier) */
       pointsPerWinner,
     },
   };

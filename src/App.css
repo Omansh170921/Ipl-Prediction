@@ -1824,6 +1824,39 @@ button.stat-card.stat-card-clickable.stat-card--win-loss:hover {
   justify-content: center;
 }
 
+.match-card-name {
+  position: absolute;
+  top: 0.4rem;
+  left: 0.5rem;
+  max-width: calc(100% - 6.5rem);
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  line-height: 1.2;
+  z-index: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.match-card:has(.match-card-name),
+.match-card-history:has(.match-card-name) {
+  padding-top: 2rem;
+}
+
+.match-points-multiplier-badge {
+  display: inline-block;
+  align-self: flex-start;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #fff;
+  background: var(--cricket-green);
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  margin-bottom: 0.35rem;
+}
+
 /* Season predictions: view participants (icon-only; count line is below title). */
 .match-card-icons--season-participants .btn-season-participants {
   border-width: 2px;
@@ -4599,6 +4632,31 @@ button.participant-pred-changes-btn {
   min-width: 0;
 }
 
+.admin-match-display-name {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--cricket-green);
+  margin-bottom: 0.2rem;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-match-mult-badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  margin: 0 0.35rem 0.2rem 0;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  background: var(--cricket-light);
+  color: var(--cricket-green);
+  border: 1px solid var(--cricket-green);
+  vertical-align: middle;
+}
+
 .match-row .match-actions {
   grid-column: 3;
   justify-self: end;
@@ -5285,6 +5343,11 @@ button.participant-pred-changes-btn {
     padding: 1rem;
     min-width: 0;
     overflow: hidden;
+  }
+
+  .match-card:has(.match-card-name),
+  .match-card-history:has(.match-card-name) {
+    padding-top: 1.85rem;
   }
 
   .match-card:has(.match-card-icons .btn),

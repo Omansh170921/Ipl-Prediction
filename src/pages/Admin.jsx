@@ -5,7 +5,7 @@ import { collection, addDoc, getDocs, getDoc, doc, setDoc, updateDoc, deleteDoc,
 import { db, callFunction } from '../firebase/config';
 import Sidebar from '../components/Sidebar';
 import { toInitCap } from '../utils/format';
-import { calculateMatchPoints, to2Decimals } from '../utils/points';
+import { calculateMatchPoints, getMatchPointsMultiplier, to2Decimals } from '../utils/points';
 import {
   isDrawOrCancelledWinner,
   MATCH_WINNER_DRAW,
@@ -149,6 +149,13 @@ function parseImportedMatches(jsonString) {
     if (cv === 'always' || cv === 'aftercutoff') {
       row.crowdPredictionVisibility = cv === 'aftercutoff' ? 'afterCutoff' : 'always';
     }
+    const matchNameImp = (m?.matchName ?? m?.matchTitle ?? '').toString().trim();
+    if (matchNameImp) row.matchName = matchNameImp;
+    const pmRaw = m?.pointsMultiplier;
+    if (pmRaw != null && pmRaw !== '') {
+      const multNum = typeof pmRaw === 'number' ? pmRaw : parseFloat(String(pmRaw).replace(',', '.'));
+      if (Number.isFinite(multNum) && multNum > 0 && multNum !== 1) row.pointsMultiplier = multNum;
+    }
     matches.push(row);
   }
   if (matches.length === 0) return { error: 'No valid matches found. Each match needs team1, team2, date.' };
@@ -171,6 +178,7 @@ export default function Admin() {
   const [newRuleValue, setNewRuleValue] = useState('');
   const [newRulePosition, setNewRulePosition] = useState('');
   const [matchForm, setMatchForm] = useState({
+    matchName: '',
     matchNumber: '',
     team1: '',
     team2: '',
@@ -180,6 +188,7 @@ export default function Admin() {
     stadium: '',
     city: '',
     crowdPredictionVisibility: 'inherit',
+    pointsMultiplier: '',
   });
   const [editingMatch, setEditingMatch] = useState(null);
   const [editingTeam, setEditingTeam] = useState(null);
@@ -1049,10 +1058,25 @@ export default function Admin() {
       return;
     }
     const matchNumber = String(matchForm.matchNumber).trim();
+    const matchNameTrim = (matchForm.matchName || '').trim();
     const stadium = (matchForm.stadium || '').trim();
     const city = (matchForm.city || '').trim();
     const crowd = matchForm.crowdPredictionVisibility;
+    const multStr = (matchForm.pointsMultiplier ?? '').toString().trim();
+    if (multStr !== '') {
+      const multNum = parseFloat(multStr.replace(',', '.'));
+      if (!Number.isFinite(multNum) || multNum <= 0) {
+        setMessage('Winner points multiplier must be a positive number, or leave blank for 1×.');
+        return;
+      }
+    }
     try {
+      const multNum =
+        multStr === '' ? null : parseFloat(multStr.replace(',', '.'));
+      const multDoc =
+        multNum != null && Number.isFinite(multNum) && multNum > 0 && multNum !== 1
+          ? { pointsMultiplier: multNum }
+          : {};
       await addDoc(
         collection(db, 'matches'),
         withPredictionCutoffAt({
@@ -1063,6 +1087,8 @@ export default function Admin() {
           time: matchForm.time || '19:00',
           thresholdTime: matchForm.thresholdTime || '18:00',
           status: 'open',
+          ...(matchNameTrim ? { matchName: matchNameTrim } : {}),
+          ...multDoc,
           ...(stadium ? { stadium } : {}),
           ...(city ? { city } : {}),
           ...(crowd === 'always' || crowd === 'afterCutoff' ? { crowdPredictionVisibility: crowd } : {}),
@@ -1071,6 +1097,7 @@ export default function Admin() {
         })
       );
       setMatchForm(prev => ({
+        matchName: '',
         matchNumber: '',
         team1: '',
         team2: '',
@@ -1080,6 +1107,7 @@ export default function Admin() {
         stadium: '',
         city: '',
         crowdPredictionVisibility: 'inherit',
+        pointsMultiplier: '',
       }));
       setMessage('Match added successfully');
       fetchData();
@@ -1100,6 +1128,7 @@ export default function Admin() {
       cv === 'always' ? 'always' : cv === 'aftercutoff' ? 'afterCutoff' : 'inherit';
     setEditingMatch({
       id: match.id,
+      matchName: match.matchName || '',
       matchNumber: match.matchNumber || '',
       team1: match.team1 || '',
       team2: match.team2 || '',
@@ -1111,6 +1140,10 @@ export default function Admin() {
       stadium: match.stadium || '',
       city: match.city || '',
       crowdPredictionVisibility,
+      pointsMultiplier:
+        match.pointsMultiplier != null && String(match.pointsMultiplier).trim() !== ''
+          ? String(match.pointsMultiplier)
+          : '',
     });
   };
 
@@ -1139,6 +1172,21 @@ export default function Admin() {
     try {
       const est = (editingMatch.stadium || '').trim();
       const ecity = (editingMatch.city || '').trim();
+      const matchNameTrim = (editingMatch.matchName || '').trim();
+      const namePatch = matchNameTrim ? { matchName: matchNameTrim } : { matchName: deleteField() };
+      const multStr = (editingMatch.pointsMultiplier ?? '').toString().trim();
+      let multPatch;
+      if (multStr === '') {
+        multPatch = { pointsMultiplier: deleteField() };
+      } else {
+        const multNum = parseFloat(multStr.replace(',', '.'));
+        if (!Number.isFinite(multNum) || multNum <= 0) {
+          setMessage('Winner points multiplier must be a positive number, or leave blank for 1×.');
+          return;
+        }
+        multPatch =
+          multNum === 1 ? { pointsMultiplier: deleteField() } : { pointsMultiplier: multNum };
+      }
       const crowd = editingMatch.crowdPredictionVisibility;
       const crowdPatch =
         crowd === 'inherit'
@@ -1162,6 +1210,8 @@ export default function Admin() {
           winner: editingMatch.winner || null,
           stadium: est || null,
           city: ecity || null,
+          ...namePatch,
+          ...multPatch,
           ...(pointResultsForNoScore ? { pointResults: pointResultsForNoScore } : {}),
           ...crowdPatch,
         })
@@ -1227,7 +1277,13 @@ export default function Admin() {
       } else {
         notifyNote = ' Push notifications skipped (disabled in Program Config).';
       }
-      setMessage(`Points calculated and saved. Winners: ${s.winners ?? 0}, Wrong: ${s.wrong ?? 0}, Not participated: ${s.notParticipated ?? 0}.${notifyNote}`);
+      const multNote =
+        s.pointsMultiplier > 1
+          ? ` Winner share ×${s.pointsMultiplier} (${s.basePointsPerWinner ?? '—'} each base → ${s.pointsPerWinner ?? '—'}).`
+          : '';
+      setMessage(
+        `Points calculated and saved. Winners: ${s.winners ?? 0}, Wrong: ${s.wrong ?? 0}, Not participated: ${s.notParticipated ?? 0}.${multNote}${notifyNote}`
+      );
       fetchData();
     } catch (err) {
       setMessage('Error: ' + err.message);
@@ -2372,6 +2428,19 @@ export default function Admin() {
             ) : (
             <form onSubmit={handleAddMatch} className="match-form">
               <div className="form-row">
+                <div className="form-group-inline" style={{ flex: 1, minWidth: '200px' }}>
+                  <label htmlFor="match-display-name">Match name (optional)</label>
+                  <input
+                    id="match-display-name"
+                    type="text"
+                    value={matchForm.matchName || ''}
+                    onChange={(e) => setMatchForm(prev => ({ ...prev, matchName: e.target.value }))}
+                    placeholder="e.g. Qualifier 1, Rivalry week"
+                    autoComplete="off"
+                  />
+                </div>
+              </div>
+              <div className="form-row">
                 <div className="form-group-inline">
                   <label htmlFor="match-number">Match ID:</label>
                   <input
@@ -2472,6 +2541,24 @@ export default function Admin() {
                   </select>
                 </div>
               </div>
+              <div className="form-row">
+                <div className="form-group-inline" style={{ flex: 1, minWidth: '160px' }}>
+                  <label htmlFor="match-points-multiplier">Winner points multiplier (optional)</label>
+                  <input
+                    id="match-points-multiplier"
+                    type="text"
+                    inputMode="decimal"
+                    value={matchForm.pointsMultiplier || ''}
+                    onChange={(e) => setMatchForm(prev => ({ ...prev, pointsMultiplier: e.target.value }))}
+                    placeholder="e.g. 2"
+                    title="Applies only to pool share for correct predictions. Wrong and no-prediction penalties are not multiplied."
+                    autoComplete="off"
+                  />
+                </div>
+                <p className="muted form-hint-inline" style={{ flex: 1, minWidth: '200px', margin: 0, alignSelf: 'flex-end' }}>
+                  e.g. 2 → correct pick gets (pool share × 2). Leave blank or 1 for normal scoring.
+                </p>
+              </div>
               <button
                 type="submit"
                 className="btn btn-primary"
@@ -2510,6 +2597,19 @@ export default function Admin() {
                   {editingMatch && (
                     <form onSubmit={handleUpdateMatch} className="match-form edit-form">
                       <h4>Edit Match</h4>
+                      <div className="form-row">
+                        <div className="form-group-inline" style={{ flex: 1, minWidth: '200px' }}>
+                          <label htmlFor="edit-match-display-name">Match name (optional)</label>
+                          <input
+                            id="edit-match-display-name"
+                            type="text"
+                            value={editingMatch.matchName || ''}
+                            onChange={(e) => setEditingMatch(prev => ({ ...prev, matchName: e.target.value }))}
+                            placeholder="e.g. Qualifier 1, Rivalry week"
+                            autoComplete="off"
+                          />
+                        </div>
+                      </div>
                       <div className="form-row">
                         <div className="form-group-inline">
                           <label htmlFor="edit-match-number">Match ID:</label>
@@ -2588,6 +2688,24 @@ export default function Admin() {
                         </div>
                       </div>
                       <div className="form-row">
+                        <div className="form-group-inline" style={{ flex: 1, minWidth: '160px' }}>
+                          <label htmlFor="edit-match-points-multiplier">Winner points multiplier (optional)</label>
+                          <input
+                            id="edit-match-points-multiplier"
+                            type="text"
+                            inputMode="decimal"
+                            value={editingMatch.pointsMultiplier || ''}
+                            onChange={(e) => setEditingMatch(prev => ({ ...prev, pointsMultiplier: e.target.value }))}
+                            placeholder="1"
+                            title="Pool share for correct predictions only; penalties unchanged"
+                            autoComplete="off"
+                          />
+                        </div>
+                        <p className="muted form-hint-inline" style={{ flex: 1, minWidth: '200px', margin: 0, alignSelf: 'flex-end' }}>
+                          Blank = 1×. Recalculate points after changing.
+                        </p>
+                      </div>
+                      <div className="form-row">
                         <input
                           type="date"
                           value={editingMatch.date}
@@ -2661,6 +2779,16 @@ export default function Admin() {
                         />
                       </label>
                       <div className="match-info">
+                        {m.matchName?.trim() && (
+                          <span className="admin-match-display-name" title={m.matchName.trim()}>
+                            {m.matchName.trim()}
+                          </span>
+                        )}
+                        {getMatchPointsMultiplier(m) !== 1 && (
+                          <span className="admin-match-mult-badge" title="Winner pool share is multiplied for this match">
+                            ×{getMatchPointsMultiplier(m)}
+                          </span>
+                        )}
                         {m.matchNumber && <span className="match-id-badge">#{m.matchNumber}</span>}
                         <span className="match-teams">{getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)}</span>
                         <span className="match-meta">{m.date} · {formatMatchTime(m.time || m.slot)}</span>
