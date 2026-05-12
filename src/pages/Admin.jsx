@@ -2779,15 +2779,19 @@ export default function Admin() {
                         />
                       </label>
                       <div className="match-info">
-                        {m.matchName?.trim() && (
-                          <span className="admin-match-display-name" title={m.matchName.trim()}>
-                            {m.matchName.trim()}
-                          </span>
-                        )}
-                        {getMatchPointsMultiplier(m) !== 1 && (
-                          <span className="admin-match-mult-badge" title="Winner pool share is multiplied for this match">
-                            ×{getMatchPointsMultiplier(m)}
-                          </span>
+                        {(m.matchName?.trim() || getMatchPointsMultiplier(m) !== 1) && (
+                          <div className="admin-match-title-row">
+                            {m.matchName?.trim() && (
+                              <span className="admin-match-display-name" title={m.matchName.trim()}>
+                                {m.matchName.trim()}
+                              </span>
+                            )}
+                            {getMatchPointsMultiplier(m) !== 1 && (
+                              <span className="admin-match-mult-badge" title="Winner pool share is multiplied for this match">
+                                ×{getMatchPointsMultiplier(m)}
+                              </span>
+                            )}
+                          </div>
                         )}
                         {m.matchNumber && <span className="match-id-badge">#{m.matchNumber}</span>}
                         <span className="match-teams">{getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)}</span>

@@ -2184,9 +2184,21 @@ export default function Dashboard() {
             <div className="matches-grid">
               {filteredMatches.map((match, idx) => (
                 <div key={match.id} id={`match-${match.id}`} className="match-card">
-                  {(match.matchName || '').trim() && (
-                    <div className="match-card-name" title={(match.matchName || '').trim()}>
-                      {(match.matchName || '').trim()}
+                  {(((match.matchName || '').trim()) || getMatchPointsMultiplier(match) !== 1) && (
+                    <div className="match-card-title-row">
+                      {(match.matchName || '').trim() && (
+                        <span className="match-card-name" title={(match.matchName || '').trim()}>
+                          {(match.matchName || '').trim()}
+                        </span>
+                      )}
+                      {getMatchPointsMultiplier(match) !== 1 && (
+                        <span
+                          className="match-points-multiplier-badge"
+                          title="Winner pool share for this match is multiplied; wrong and no-prediction penalties are not"
+                        >
+                          ×{getMatchPointsMultiplier(match)}
+                        </span>
+                      )}
                     </div>
                   )}
                   <div className="match-card-icons">
@@ -2213,14 +2225,6 @@ export default function Dashboard() {
                     )}
                   </div>
                   <div className="match-info">
-                    {getMatchPointsMultiplier(match) !== 1 && (
-                      <span
-                        className="match-points-multiplier-badge"
-                        title="Winner pool share for this match is multiplied; wrong and no-prediction penalties are not"
-                      >
-                        ×{getMatchPointsMultiplier(match)}
-                      </span>
-                    )}
                     <span className="match-number">{match.matchNumber || (idx + 1)}/{maxMatchId}</span>
                     <span className="match-slot">{formatMatchTime(match.time || match.slot)}</span>
                     {(match.thresholdTime || match.time) && (
@@ -2387,9 +2391,21 @@ export default function Dashboard() {
                 <div className="matches-grid history-grid">
                   {historyMatches.map((match, idx) => (
                     <div key={match.id} id={`match-${match.id}`} className="match-card match-card-history">
-                      {(match.matchName || '').trim() && (
-                        <div className="match-card-name" title={(match.matchName || '').trim()}>
-                          {(match.matchName || '').trim()}
+                      {(((match.matchName || '').trim()) || getMatchPointsMultiplier(match) !== 1) && (
+                        <div className="match-card-title-row">
+                          {(match.matchName || '').trim() && (
+                            <span className="match-card-name" title={(match.matchName || '').trim()}>
+                              {(match.matchName || '').trim()}
+                            </span>
+                          )}
+                          {getMatchPointsMultiplier(match) !== 1 && (
+                            <span
+                              className="match-points-multiplier-badge"
+                              title="Winner pool share for this match is multiplied; wrong and no-prediction penalties are not"
+                            >
+                              ×{getMatchPointsMultiplier(match)}
+                            </span>
+                          )}
                         </div>
                       )}
                       <div className="match-card-icons">
@@ -2416,14 +2432,6 @@ export default function Dashboard() {
                         )}
                       </div>
                       <div className="match-info">
-                        {getMatchPointsMultiplier(match) !== 1 && (
-                          <span
-                            className="match-points-multiplier-badge"
-                            title="Winner pool share for this match is multiplied; wrong and no-prediction penalties are not"
-                          >
-                            ×{getMatchPointsMultiplier(match)}
-                          </span>
-                        )}
                         <span className="match-number">{match.matchNumber || (idx + 1)}/{maxMatchId}</span>
                         <div className="match-meta-row">
                           <span className="match-date">{match.date}</span>

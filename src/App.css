@@ -1824,29 +1824,43 @@ button.stat-card.stat-card-clickable.stat-card--win-loss:hover {
   justify-content: center;
 }
 
-.match-card-name {
+.match-card-title-row {
   position: absolute;
   top: 0.4rem;
   left: 0.5rem;
   max-width: calc(100% - 6.5rem);
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  min-width: 0;
+  z-index: 1;
+}
+
+.match-card-title-row .match-card-name {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 0.75rem;
   font-weight: 700;
   color: var(--text-muted);
   line-height: 1.2;
-  z-index: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.match-card:has(.match-card-name),
-.match-card-history:has(.match-card-name) {
+.match-card-title-row .match-points-multiplier-badge {
+  flex-shrink: 0;
+  margin-bottom: 0;
+}
+
+.match-card:has(.match-card-title-row),
+.match-card-history:has(.match-card-title-row) {
   padding-top: 2rem;
 }
 
 .match-points-multiplier-badge {
   display: inline-block;
-  align-self: flex-start;
   font-size: 0.72rem;
   font-weight: 700;
   line-height: 1.2;
@@ -4632,13 +4646,24 @@ button.participant-pred-changes-btn {
   min-width: 0;
 }
 
+.admin-match-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  min-width: 0;
+  margin-bottom: 0.2rem;
+  max-width: 100%;
+}
+
 .admin-match-display-name {
   display: block;
   font-size: 0.8rem;
   font-weight: 600;
   color: var(--cricket-green);
-  margin-bottom: 0.2rem;
-  max-width: 100%;
+  margin-bottom: 0;
+  min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4648,7 +4673,8 @@ button.participant-pred-changes-btn {
   display: inline-block;
   font-size: 0.72rem;
   font-weight: 700;
-  margin: 0 0.35rem 0.2rem 0;
+  flex-shrink: 0;
+  margin: 0;
   padding: 0.1rem 0.4rem;
   border-radius: 4px;
   background: var(--cricket-light);
@@ -5345,8 +5371,8 @@ button.participant-pred-changes-btn {
     overflow: hidden;
   }
 
-  .match-card:has(.match-card-name),
-  .match-card-history:has(.match-card-name) {
+  .match-card:has(.match-card-title-row),
+  .match-card-history:has(.match-card-title-row) {
     padding-top: 1.85rem;
   }
 
