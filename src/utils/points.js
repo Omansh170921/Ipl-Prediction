@@ -13,6 +13,23 @@ export function getMatchPointsMultiplier(match) {
   return n;
 }
 
+/** UI text e.g. "X2 multiplier" (capital X). Empty string when value is 1 or invalid. */
+export function formatMultiplierLabel(multiplierValue) {
+  const n =
+    typeof multiplierValue === 'number'
+      ? multiplierValue
+      : parseFloat(String(multiplierValue ?? '').replace(',', '.'));
+  if (!Number.isFinite(n) || n <= 0 || n === 1) return '';
+  const rounded = to2Decimals(n);
+  const numPart = Number.isInteger(rounded) ? String(Math.trunc(rounded)) : String(rounded);
+  return `X${numPart} multiplier`;
+}
+
+/** Same as formatMultiplierLabel(getMatchPointsMultiplier(match)). */
+export function formatMatchMultiplierUi(match) {
+  return formatMultiplierLabel(getMatchPointsMultiplier(match));
+}
+
 /**
  * Calculate points for a completed match.
  * @param {Object} match - Match with winner, team1, team2

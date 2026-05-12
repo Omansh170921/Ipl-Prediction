@@ -5,7 +5,13 @@ import { collection, addDoc, getDocs, getDoc, doc, setDoc, updateDoc, deleteDoc,
 import { db, callFunction } from '../firebase/config';
 import Sidebar from '../components/Sidebar';
 import { toInitCap } from '../utils/format';
-import { calculateMatchPoints, getMatchPointsMultiplier, to2Decimals } from '../utils/points';
+import {
+  calculateMatchPoints,
+  formatMatchMultiplierUi,
+  formatMultiplierLabel,
+  getMatchPointsMultiplier,
+  to2Decimals,
+} from '../utils/points';
 import {
   isDrawOrCancelledWinner,
   MATCH_WINNER_DRAW,
@@ -1279,7 +1285,7 @@ export default function Admin() {
       }
       const multNote =
         s.pointsMultiplier > 1
-          ? ` Winner share ×${s.pointsMultiplier} (${s.basePointsPerWinner ?? '—'} each base → ${s.pointsPerWinner ?? '—'}).`
+          ? ` Winner share: ${formatMultiplierLabel(s.pointsMultiplier)} (${s.basePointsPerWinner ?? '—'} each base → ${s.pointsPerWinner ?? '—'}).`
           : '';
       setMessage(
         `Points calculated and saved. Winners: ${s.winners ?? 0}, Wrong: ${s.wrong ?? 0}, Not participated: ${s.notParticipated ?? 0}.${multNote}${notifyNote}`
@@ -2788,7 +2794,7 @@ export default function Admin() {
                             )}
                             {getMatchPointsMultiplier(m) !== 1 && (
                               <span className="admin-match-mult-badge" title="Winner pool share is multiplied for this match">
-                                ×{getMatchPointsMultiplier(m)}
+                                {formatMatchMultiplierUi(m)}
                               </span>
                             )}
                           </div>
