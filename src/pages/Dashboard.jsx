@@ -1534,51 +1534,6 @@ export default function Dashboard() {
                   <span className="stat-label">Leaderboard position</span>
                 </button>
                   </div>
-                  {todayMatches.length > 0 && (
-                    <div className="dashboard-today-matches-preview">
-                      <h3 className="dashboard-today-matches-preview-title">Matches today ({today})</h3>
-                      <ul className="dashboard-today-matches-preview-list">
-                        {[...todayMatches]
-                          .sort((a, b) => (a.time || '00:00').localeCompare(b.time || '00:00'))
-                          .map((m) => (
-                            <li key={m.id} className="dashboard-today-matches-preview-item">
-                              {(((m.matchName || '').trim()) || getMatchPointsMultiplier(m) !== 1) && (
-                                <div className="dashboard-today-matches-preview-title-row">
-                                  {(m.matchName || '').trim() && (
-                                    <span className="dashboard-today-matches-preview-name" title={(m.matchName || '').trim()}>
-                                      {(m.matchName || '').trim()}
-                                    </span>
-                                  )}
-                                  {getMatchPointsMultiplier(m) !== 1 && (
-                                    <span
-                                      className="match-points-multiplier-badge"
-                                      title="Winner pool share for this match is multiplied; wrong and no-prediction penalties are not"
-                                    >
-                                      {formatMatchMultiplierUi(m)}
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-                              <div className="dashboard-today-matches-preview-teams">
-                                <span className="dashboard-today-matches-preview-teams-text">
-                                  #{m.matchNumber || m.id} {getTeamCode(m.team1, teams)} vs {getTeamCode(m.team2, teams)}
-                                </span>
-                                <span className="dashboard-today-matches-preview-time muted">
-                                  {formatMatchTime(m.time || m.slot)}
-                                </span>
-                              </div>
-                            </li>
-                          ))}
-                      </ul>
-                      <button
-                        type="button"
-                        className="btn btn-sm dashboard-today-matches-preview-cta"
-                        onClick={() => setShowTodayMatchesModal(true)}
-                      >
-                        Predict &amp; details
-                      </button>
-                    </div>
-                  )}
                   {(leaderboardLoading && activeSection === 'dashboard') && (
                     <p className="dashboard-loading-hint muted">Loading your stats…</p>
                   )}
