@@ -1,4 +1,5 @@
 import { Link, NavLink } from 'react-router-dom';
+import { ThemeToggle } from './ThemeToggle';
 import { toInitCap } from '../utils/format';
 
 export default function Sidebar({ admin = false, userProfile, user, onLogout, activeSection = 'matches', onSectionChange, isInsightApprover = false, isMobileOpen = false, onMobileClose }) {
@@ -125,6 +126,7 @@ export default function Sidebar({ admin = false, userProfile, user, onLogout, ac
       </nav>
 
       <div className="sidebar-footer">
+        <ThemeToggle variant="sidebar" />
         <button type="button" className="sidebar-link sidebar-logout" onClick={() => { onLogout(); onMobileClose?.(); }}>
           <span className="sidebar-icon">🚪</span>
           Logout

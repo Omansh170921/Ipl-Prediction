@@ -1,5 +1,7 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { ThemeProvider } from './context/ThemeContext';
 import { AuthProvider } from './context/AuthContext';
+import { ThemeToggle } from './components/ThemeToggle';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
@@ -13,6 +15,7 @@ import Dashboard from './pages/Dashboard';
 import Admin from './pages/Admin';
 import InsightApproval from './pages/InsightApproval';
 import './App.css';
+import './theme/theme-menu.css';
 import { requestNotificationPermission, saveFCMTokenToUser, registerIplNotificationSoundHandlers } from './notification';
 import { useEffect } from 'react';
 import { useAuth } from './context/AuthContext';
@@ -40,12 +43,22 @@ function NotificationRegistration() {
   return null;
 }
 
+function FloatingThemeToggle() {
+  const { pathname } = useLocation();
+  if (pathname === '/dashboard' || pathname === '/admin' || pathname === '/insight-approval') {
+    return null;
+  }
+  return <ThemeToggle />;
+}
+
 function App() {
 
   return (
-    <AuthProvider>
-      <NotificationRegistration />
-      <BrowserRouter>
+    <ThemeProvider>
+      <AuthProvider>
+        <NotificationRegistration />
+        <BrowserRouter>
+        <FloatingThemeToggle />
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
@@ -81,8 +94,9 @@ function App() {
           />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-      </BrowserRouter>
-    </AuthProvider>
+        </BrowserRouter>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
 
